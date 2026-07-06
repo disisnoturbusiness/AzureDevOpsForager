@@ -77,6 +77,16 @@
   transition: border-color .15s ease, color .15s ease, background .15s ease;
 }
 .theme-toggle:hover { border-color: var(--line-strong); color: var(--txt-0); }
+.topbar-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--txt-1);
+  transition: border-color .15s ease, color .15s ease;
+}
+.topbar-link:hover { border-color: var(--line-strong); color: var(--txt-0); }
 
 * { box-sizing: border-box; }
 
@@ -643,6 +653,16 @@ body::after {
   font-size: 0.72rem;
   color: var(--txt-3);
 }
+.foot-about {
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  color: var(--txt-2);
+  max-width: 640px;
+  margin: 0 auto 0.6rem;
+}
+.foot-links { margin: 0.55rem 0 0; }
+.foot-links a { color: var(--txt-2); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.foot-links a:hover { color: var(--acc); }
 
 /* ---------- responsive ---------- */
 @media (max-width: 640px) {

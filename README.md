@@ -1,5 +1,7 @@
 # Azure DevOps Forager
 
+[**▶ Live demo — azuredevops.aidataforager.com**](https://azuredevops.aidataforager.com)  ·  [User Guide](docs/USER_GUIDE.md)  ·  [Developer Guide](docs/DEVELOPER_GUIDE.md)  ·  [Functional Matrix](docs/FUNCTIONAL_MATRIX.md)  ·  MIT licensed
+
 **Semantic + lexical code search over your codebase, powered by SQL Server 2025 native vectors, a cross-encoder reranker, and pluggable embeddings — run fully offline on local ONNX, or point at a Hugging Face endpoint — with a grounded LLM chat on top.**
 
 Azure DevOps Forager indexes a codebase (Azure DevOps TFVC, Azure DevOps Git, or GitHub) into SQL Server 2025's
@@ -238,6 +240,7 @@ a shipped artifact or sent to a client.
 
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — installing, indexing a codebase, and using search + chat.
 - [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) — architecture, the retrieval pipeline, and extending it.
+- [docs/FUNCTIONAL_MATRIX.md](docs/FUNCTIONAL_MATRIX.md) — every capability, where it lives in the code, and how it's verified.
 
 ## License
 
