@@ -129,9 +129,10 @@ connect).
 ```bash
 cp config.sample.json config.json     # then edit
 ```
-Set at least `SqlConnectionString`, then either `OnnxModelPath` (local) or `HuggingFaceEmbedUrl` +
-`HuggingFaceRerankUrl` (hosted). `config.json` is gitignored — it can hold a connection string and the
-non-secret HF URLs. The `HF_TOKEN` and Groq key are **not** config keys (see the run step below).
+Set at least `SqlConnectionString` and `AzdoVectorConnectionString` (usually the same value), then either
+`OnnxModelPath` (local) or `HuggingFaceEmbedUrl` + `HuggingFaceRerankUrl` (hosted). `config.json` is
+gitignored — it can hold a connection string and the non-secret HF URLs. The `HF_TOKEN` and Groq key are
+**not** config keys (see the run step below).
 
 **4. Build the index**
 
@@ -211,6 +212,7 @@ working default; you override only what you need.
 | `ServerUrl` | URL the clients call for `/query` and `/chat` (default `https://azuredevops.aidataforager.com`, the hosted demo) |
 | `Port` | Server listen port |
 | `SqlConnectionString` | Target SQL Server / Azure SQL database |
+| `AzdoVectorConnectionString` | SQL DB the Indexer writes the vector index into — usually the same as `SqlConnectionString` |
 | `OnnxModelPath` | Path to local `e5-large-v2.onnx` (used when Hugging Face is not configured) |
 | `HuggingFaceEmbedUrl` / `HuggingFaceRerankUrl` | Hugging Face Inference Endpoint URLs for embedding + reranking (not secret; leave blank to use local ONNX) |
 | `EmbeddingServiceUrl` | Hosted Server `/embed` service the Indexer uses to embed remotely when no local model and no HF endpoint is configured (default: the demo server) |

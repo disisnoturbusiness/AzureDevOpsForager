@@ -16,6 +16,8 @@
   "HuggingFaceEmbedUrl": "",
   "HuggingFaceRerankUrl": "",
 
+  "EmbeddingServiceUrl": "https://azuredevopsforager.azurewebsites.net",
+
   "SourceType": "github",
   "GitHubRepoUrl": "https://github.com/dotnet-architecture/eShopOnWeb",
   "GitBranch": "",

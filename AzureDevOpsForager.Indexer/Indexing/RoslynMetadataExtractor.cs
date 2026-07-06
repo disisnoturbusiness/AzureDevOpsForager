@@ -134,7 +134,7 @@ public static class RoslynMetadataExtractor
    public static FileMetadata Extract( string content )
    {
       var metadata = new FileMetadata();
-      if ( string.IsNullOrWhiteSpace( content ) )
+      if( string.IsNullOrWhiteSpace( content ) )
          return metadata;
 
       CompilationUnitSyntax root;
@@ -249,13 +249,13 @@ public static class RoslynMetadataExtractor
    private static ( string modifiers, string className, string baseClass, string interfaces ) ExtractClassInfo( CompilationUnitSyntax root )
    {
       var typeDecl = root.DescendantNodes().OfType<TypeDeclarationSyntax>().FirstOrDefault();
-      if ( typeDecl is null )
+      if( typeDecl is null )
          return ("", "", "", "");
 
       var modifiers = typeDecl.Modifiers.ToString();
       var className = typeDecl.Identifier.Text;
 
-      if ( typeDecl.BaseList is null )
+      if( typeDecl.BaseList is null )
          return (modifiers, className, "", "");
 
       var baseTypes = typeDecl.BaseList.Types.Select( baseType => baseType.Type.ToString() ).ToList();
@@ -264,9 +264,9 @@ public static class RoslynMetadataExtractor
 
       var baseClass = "";
       var interfaceList = new List<string>();
-      foreach ( var baseType in baseTypes )
+      foreach( var baseType in baseTypes )
       {
-         if ( baseClass == "" && !LooksLikeInterface( baseType ) )
+         if( baseClass == "" && !LooksLikeInterface( baseType ) )
             baseClass = baseType;
          else
             interfaceList.Add( baseType );
@@ -319,13 +319,13 @@ public static class RoslynMetadataExtractor
    private static Dictionary<string, List<string>> ExtractEnums( CompilationUnitSyntax root )
    {
       var enums = new Dictionary<string, List<string>>();
-      foreach ( var enumDecl in root.DescendantNodes().OfType<EnumDeclarationSyntax>() )
+      foreach( var enumDecl in root.DescendantNodes().OfType<EnumDeclarationSyntax>() )
       {
          var values = enumDecl.Members
             .Select( enumMember => enumMember.Identifier.Text )
             .Where( value => value != "None" && value != "Default" )
             .ToList();
-         if ( values.Count > 0 )
+         if( values.Count > 0 )
             enums[enumDecl.Identifier.Text] = values;
       }
       return enums;
@@ -409,26 +409,26 @@ public static class RoslynMetadataExtractor
 
       void AddType( TypeSyntax? type )
       {
-         if ( type is null ) return;
-         foreach ( var name in SimpleTypeNames( type ) ) names.Add( name );
+         if( type is null ) return;
+         foreach( var name in SimpleTypeNames( type ) ) names.Add( name );
       }
 
-      foreach ( var objectCreation in root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>() ) AddType( objectCreation.Type );
-      foreach ( var variableDeclaration in root.DescendantNodes().OfType<VariableDeclarationSyntax>() ) AddType( variableDeclaration.Type );
-      foreach ( var parameter in root.DescendantNodes().OfType<ParameterSyntax>() ) AddType( parameter.Type );
-      foreach ( var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>() ) AddType( method.ReturnType );
-      foreach ( var baseType in root.DescendantNodes().OfType<BaseTypeSyntax>() ) AddType( baseType.Type );
-      foreach ( var castExpression in root.DescendantNodes().OfType<CastExpressionSyntax>() ) AddType( castExpression.Type );
-      foreach ( var typeOfExpression in root.DescendantNodes().OfType<TypeOfExpressionSyntax>() ) AddType( typeOfExpression.Type );
-      foreach ( var genericName in root.DescendantNodes().OfType<GenericNameSyntax>() )
+      foreach( var objectCreation in root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>() ) AddType( objectCreation.Type );
+      foreach( var variableDeclaration in root.DescendantNodes().OfType<VariableDeclarationSyntax>() ) AddType( variableDeclaration.Type );
+      foreach( var parameter in root.DescendantNodes().OfType<ParameterSyntax>() ) AddType( parameter.Type );
+      foreach( var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>() ) AddType( method.ReturnType );
+      foreach( var baseType in root.DescendantNodes().OfType<BaseTypeSyntax>() ) AddType( baseType.Type );
+      foreach( var castExpression in root.DescendantNodes().OfType<CastExpressionSyntax>() ) AddType( castExpression.Type );
+      foreach( var typeOfExpression in root.DescendantNodes().OfType<TypeOfExpressionSyntax>() ) AddType( typeOfExpression.Type );
+      foreach( var genericName in root.DescendantNodes().OfType<GenericNameSyntax>() )
       {
          names.Add( genericName.Identifier.Text );
-         foreach ( var arg in genericName.TypeArgumentList.Arguments ) AddType( arg );
+         foreach( var arg in genericName.TypeArgumentList.Arguments ) AddType( arg );
       }
       // Leftmost identifier of a member-access chain: static helper / extension-class calls.
       // The uppercase filter skips locals and params.
-      foreach ( var memberAccess in root.DescendantNodes().OfType<MemberAccessExpressionSyntax>() )
-         if ( memberAccess.Expression is IdentifierNameSyntax id && id.Identifier.Text is { Length: > 0 } identifierText && char.IsUpper( identifierText[0] ) )
+      foreach( var memberAccess in root.DescendantNodes().OfType<MemberAccessExpressionSyntax>() )
+         if( memberAccess.Expression is IdentifierNameSyntax id && id.Identifier.Text is { Length: > 0 } identifierText && char.IsUpper( identifierText[0] ) )
             names.Add( identifierText );
 
       return string.Join( " ", names.OrderBy( name => name, StringComparer.Ordinal ) );
@@ -442,27 +442,27 @@ public static class RoslynMetadataExtractor
    /// </summary>
    private static IEnumerable<string> SimpleTypeNames( TypeSyntax type )
    {
-      switch ( type )
+      switch( type )
       {
          case IdentifierNameSyntax id:
             yield return id.Identifier.Text;
             break;
          case QualifiedNameSyntax qualifiedName:
-            foreach ( var name in SimpleTypeNames( qualifiedName.Right ) ) yield return name;
+            foreach( var name in SimpleTypeNames( qualifiedName.Right ) ) yield return name;
             break;
          case AliasQualifiedNameSyntax aliasQualifiedName:
-            foreach ( var name in SimpleTypeNames( aliasQualifiedName.Name ) ) yield return name;
+            foreach( var name in SimpleTypeNames( aliasQualifiedName.Name ) ) yield return name;
             break;
          case GenericNameSyntax genericName:
             yield return genericName.Identifier.Text;
-            foreach ( var arg in genericName.TypeArgumentList.Arguments )
-               foreach ( var name in SimpleTypeNames( arg ) ) yield return name;
+            foreach( var arg in genericName.TypeArgumentList.Arguments )
+               foreach( var name in SimpleTypeNames( arg ) ) yield return name;
             break;
          case NullableTypeSyntax nullableType:
-            foreach ( var name in SimpleTypeNames( nullableType.ElementType ) ) yield return name;
+            foreach( var name in SimpleTypeNames( nullableType.ElementType ) ) yield return name;
             break;
          case ArrayTypeSyntax arrayType:
-            foreach ( var name in SimpleTypeNames( arrayType.ElementType ) ) yield return name;
+            foreach( var name in SimpleTypeNames( arrayType.ElementType ) ) yield return name;
             break;
       }
    }

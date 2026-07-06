@@ -71,7 +71,7 @@ public class RoslynChunker
    /// <returns>The chunks, or an empty list when the content is blank.</returns>
    public List<CodeChunkDto> ChunkFile( string filePath, string content )
    {
-      if ( string.IsNullOrWhiteSpace( content ) )
+      if( string.IsNullOrWhiteSpace( content ) )
          return [];
 
       var syntaxTree = CSharpSyntaxTree.ParseText( content );
@@ -91,7 +91,7 @@ public class RoslynChunker
    /// <returns>The chunks, or an empty list when the content is blank.</returns>
    public List<CodeChunkDto> ChunkFile( string filePath, string content, SyntaxTree syntaxTree )
    {
-      if ( string.IsNullOrWhiteSpace( content ) )
+      if( string.IsNullOrWhiteSpace( content ) )
          return [];
 
       var root = syntaxTree.GetCompilationUnitRoot();
@@ -101,23 +101,23 @@ public class RoslynChunker
       var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
 
       // No types at all (a script, a file of only usings, etc.): index the whole file as one chunk.
-      if ( typeDeclarations.Count == 0 )
+      if( typeDeclarations.Count == 0 )
       {
          chunks.Add( MakeFileChunk( filePath, content, lines ) );
          return chunks;
       }
 
-      foreach ( var typeDeclaration in typeDeclarations )
+      foreach( var typeDeclaration in typeDeclarations )
       {
          // Nested types are covered by their parent's walk, so skip them here.
-         if ( typeDeclaration.Parent is TypeDeclarationSyntax )
+         if( typeDeclaration.Parent is TypeDeclarationSyntax )
             continue;
 
          ChunkTopLevelType( filePath, typeDeclaration, root, lines, chunks );
       }
 
       // Safety net: if the type walk somehow produced nothing usable, index the whole file.
-      if ( chunks.Count == 0 )
+      if( chunks.Count == 0 )
          chunks.Add( MakeFileChunk( filePath, content, lines ) );
 
       return chunks;
@@ -154,7 +154,7 @@ public class RoslynChunker
       var classContext = GetClassContext( typeDeclaration );
 
       // Interfaces have no bodies to split, so we index the whole declaration as one chunk.
-      if ( typeDeclaration is InterfaceDeclarationSyntax interfaceDeclaration )
+      if( typeDeclaration is InterfaceDeclarationSyntax interfaceDeclaration )
       {
          chunks.Add( MakeInterfaceChunk( filePath, interfaceDeclaration, namespaceName, lines ) );
          return;
@@ -189,7 +189,7 @@ public class RoslynChunker
    {
       var memberChunks = new List<CodeChunkDto>();
 
-      foreach ( var member in typeDeclaration.Members )
+      foreach( var member in typeDeclaration.Members )
       {
          IReadOnlyList<CodeChunkDto>? chunksFromMember = member switch
          {
@@ -205,7 +205,7 @@ public class RoslynChunker
             _ => null
          };
 
-         if ( chunksFromMember is not null )
+         if( chunksFromMember is not null )
             memberChunks.AddRange( chunksFromMember );
       }
 
@@ -302,19 +302,19 @@ public class RoslynChunker
    private static void AppendUsingsAndNamespace(
       System.Text.StringBuilder builder, TypeDeclarationSyntax typeDeclaration, CompilationUnitSyntax root )
    {
-      foreach ( var usingDirective in root.Usings )
+      foreach( var usingDirective in root.Usings )
          builder.AppendLine( usingDirective.ToFullString().TrimEnd() );
 
-      if ( root.Usings.Count > 0 )
+      if( root.Usings.Count > 0 )
          builder.AppendLine();
 
       var namespaceNode = typeDeclaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
-      if ( namespaceNode is FileScopedNamespaceDeclarationSyntax fileScopedNamespace )
+      if( namespaceNode is FileScopedNamespaceDeclarationSyntax fileScopedNamespace )
       {
          builder.AppendLine( $"namespace {fileScopedNamespace.Name};" );
          builder.AppendLine();
       }
-      else if ( namespaceNode is NamespaceDeclarationSyntax blockNamespace )
+      else if( namespaceNode is NamespaceDeclarationSyntax blockNamespace )
       {
          builder.AppendLine( $"namespace {blockNamespace.Name}" );
          builder.AppendLine( "{" );
@@ -332,7 +332,7 @@ public class RoslynChunker
          .Where( t => t.IsKind( SyntaxKind.SingleLineDocumentationCommentTrivia )
                    || t.IsKind( SyntaxKind.MultiLineDocumentationCommentTrivia ) )
          .Select( t => t.ToFullString() );
-      foreach ( var comment in leadingDocComments )
+      foreach( var comment in leadingDocComments )
          builder.Append( comment );
 
       builder.AppendLine( GetTypeDeclarationLine( typeDeclaration ) );
@@ -348,9 +348,9 @@ public class RoslynChunker
    private static void AppendShellMembers(
       System.Text.StringBuilder builder, TypeDeclarationSyntax typeDeclaration, string filePath )
    {
-      foreach ( var member in typeDeclaration.Members )
+      foreach( var member in typeDeclaration.Members )
       {
-         switch ( member )
+         switch( member )
          {
             case FieldDeclarationSyntax field:
                builder.AppendLine( $"    {field.ToFullString().Trim()}" );
@@ -392,12 +392,12 @@ public class RoslynChunker
       var fullContent = prefix + memberText;
 
       // Oversized method with a real body: try to split it at top-level statement boundaries.
-      if ( EstimateTokens( fullContent ) > TargetMaxTokens
+      if( EstimateTokens( fullContent ) > TargetMaxTokens
            && member is BaseMethodDeclarationSyntax { Body: { } methodBody } )
       {
          var split = SplitOversizedMethod(
             filePath, chunkType, name, member, methodBody, prefix, startLine, namespaceName, classContext );
-         if ( split.Count > 1 )
+         if( split.Count > 1 )
             return split;
          // Couldn't split usefully; fall through and emit it whole.
       }
@@ -440,13 +440,13 @@ public class RoslynChunker
       var headerLine = $"// Method signature: {signatureHeader}\n";
 
       var statements = methodBody.Statements;
-      if ( statements.Count == 0 )
+      if( statements.Count == 0 )
          return Array.Empty<CodeChunkDto>();
 
       var groups = GroupStatementsByBudget( statements, prefix, headerLine );
 
       // Only one group means splitting bought us nothing; let the caller emit the method whole.
-      if ( groups.Count <= 1 )
+      if( groups.Count <= 1 )
          return Array.Empty<CodeChunkDto>();
 
       return BuildSplitChunks(
@@ -471,13 +471,13 @@ public class RoslynChunker
       var current = new List<StatementSyntax>();
       var currentTokens = 0;
 
-      foreach ( var statement in statements )
+      foreach( var statement in statements )
       {
          var statementTokens = EstimateTokens( statement.GetText().ToString() );
 
          // Adding this statement would overflow the budget and we already have content: flush.
          // A single statement is never split across parts, even when it's individually oversized.
-         if ( current.Count > 0 && currentTokens + statementTokens > perPartBudget )
+         if( current.Count > 0 && currentTokens + statementTokens > perPartBudget )
          {
             groups.Add( SnapshotGroup( current ) );
             current.Clear();
@@ -488,7 +488,7 @@ public class RoslynChunker
          currentTokens += statementTokens;
       }
 
-      if ( current.Count > 0 )
+      if( current.Count > 0 )
          groups.Add( SnapshotGroup( current ) );
 
       return groups;
@@ -521,18 +521,18 @@ public class RoslynChunker
       var enclosingClass = GetEnclosingClassName( member );
       var partIndex = 1;
 
-      foreach ( var (statements, groupStart, groupEnd) in groups )
+      foreach( var (statements, groupStart, groupEnd) in groups )
       {
          var builder = new System.Text.StringBuilder();
          builder.Append( prefix );
          builder.Append( headerLine );
          builder.Append( "// (part " ).Append( partIndex ).Append( '/' ).Append( totalParts ).AppendLine( ")" );
 
-         foreach ( var statement in statements )
+         foreach( var statement in statements )
          {
             var statementText = statement.GetText().ToString();
             builder.Append( statementText );
-            if ( !statementText.EndsWith( '\n' ) )
+            if( !statementText.EndsWith( '\n' ) )
                builder.AppendLine();
          }
 
@@ -564,15 +564,15 @@ public class RoslynChunker
    private static List<CodeChunkDto> MergeUndersized(
       List<CodeChunkDto> chunks, string filePath, string namespaceName, string classContext )
    {
-      if ( chunks.Count == 0 )
+      if( chunks.Count == 0 )
          return chunks;
 
       var result = new List<CodeChunkDto>();
       var pending = new List<CodeChunkDto>();
 
-      foreach ( var chunk in chunks )
+      foreach( var chunk in chunks )
       {
-         if ( EstimateTokens( chunk.Content ) < MinTokenEstimate )
+         if( EstimateTokens( chunk.Content ) < MinTokenEstimate )
          {
             pending.Add( chunk );
          }
@@ -599,10 +599,10 @@ public class RoslynChunker
       List<CodeChunkDto> result, List<CodeChunkDto> pending,
       string filePath, string namespaceName, string classContext )
    {
-      if ( pending.Count == 0 )
+      if( pending.Count == 0 )
          return;
 
-      if ( pending.Count == 1 )
+      if( pending.Count == 1 )
       {
          result.Add( pending[0] );
          return;
@@ -632,23 +632,23 @@ public class RoslynChunker
    /// </summary>
    private static void ApplySiblingOverlap( List<CodeChunkDto> chunks )
    {
-      if ( chunks.Count < 2 )
+      if( chunks.Count < 2 )
          return;
 
-      for ( int i = 0; i < chunks.Count - 1; i++ )
+      for( int i = 0; i < chunks.Count - 1; i++ )
       {
          var current = chunks[i];
          var next = chunks[i + 1];
 
          // Already near the cap: adding overlap would push it into the truncation zone.
-         if ( EstimateTokens( current.Content ) >= OverlapBudgetCeiling )
+         if( EstimateTokens( current.Content ) >= OverlapBudgetCeiling )
             continue;
 
          // Pull from raw content (which includes the next chunk's context prefix). The prefix
          // repetition is intentional: it surfaces the next member's signature in this chunk's
          // embedding window.
          var preview = ExtractLeadingPreview( next.Content, OverlapTargetTokens );
-         if ( string.IsNullOrWhiteSpace( preview ) )
+         if( string.IsNullOrWhiteSpace( preview ) )
             continue;
 
          // CodeChunkDto is a plain class with settable properties, so mutate in place.
@@ -666,29 +666,29 @@ public class RoslynChunker
    /// </summary>
    private static string ExtractLeadingPreview( string text, int maxTokens )
    {
-      if ( string.IsNullOrEmpty( text ) )
+      if( string.IsNullOrEmpty( text ) )
          return string.Empty;
 
       var words = text.Split( [' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries );
       var maxWords = (int)Math.Ceiling( maxTokens / TokenEstimateFactor );
-      if ( maxWords >= words.Length )
+      if( maxWords >= words.Length )
          return text;
 
       // Walk char-by-char to find where the first maxWords words end, preserving formatting.
       var wordsSeen = 0;
       var inWord = false;
-      for ( int idx = 0; idx < text.Length; idx++ )
+      for( int idx = 0; idx < text.Length; idx++ )
       {
          var character = text[idx];
          var isSeparator = character == ' ' || character == '\t' || character == '\n' || character == '\r';
-         if ( inWord && isSeparator )
+         if( inWord && isSeparator )
          {
             inWord = false;
             wordsSeen++;
-            if ( wordsSeen >= maxWords )
+            if( wordsSeen >= maxWords )
                return text[..idx];
          }
-         else if ( !inWord && !isSeparator )
+         else if( !inWord && !isSeparator )
          {
             inWord = true;
          }
@@ -709,23 +709,23 @@ public class RoslynChunker
       var builder = new System.Text.StringBuilder();
       builder.AppendLine( $"// File: {filePath}" );
 
-      if ( !string.IsNullOrEmpty( namespaceName ) )
+      if( !string.IsNullOrEmpty( namespaceName ) )
          builder.AppendLine( $"// Namespace: {namespaceName}" );
 
-      if ( !string.IsNullOrEmpty( classContext ) )
+      if( !string.IsNullOrEmpty( classContext ) )
          builder.AppendLine( $"// Class: {classContext}" );
 
-      if ( member.Parent is TypeDeclarationSyntax parentType )
+      if( member.Parent is TypeDeclarationSyntax parentType )
       {
          var fields = parentType.Members.OfType<FieldDeclarationSyntax>()
             .Select( f => f.ToFullString().Trim() )
             .ToList();
 
-         if ( fields.Count > 0 )
+         if( fields.Count > 0 )
          {
             // Cap at five fields to keep the prefix small; note the elision when there are more.
             var fieldSummary = string.Join( "; ", fields.Take( 5 ) );
-            if ( fields.Count > 5 )
+            if( fields.Count > 5 )
                fieldSummary += "; ...";
             builder.AppendLine( $"// Fields: {fieldSummary}" );
          }
@@ -841,7 +841,7 @@ public class RoslynChunker
    /// </summary>
    private static bool HasNonTrivialBody( PropertyDeclarationSyntax property )
    {
-      if ( property.AccessorList is null )
+      if( property.AccessorList is null )
          return property.ExpressionBody is not null;
 
       return property.AccessorList.Accessors.Any( a => a.Body is not null || a.ExpressionBody is not null );
@@ -864,19 +864,19 @@ public class RoslynChunker
    /// </summary>
    internal static int EstimateTokens( string text )
    {
-      if ( string.IsNullOrWhiteSpace( text ) )
+      if( string.IsNullOrWhiteSpace( text ) )
          return 0;
 
       var wordCount = 0;
       var inWord = false;
 
-      for ( int i = 0; i < text.Length; i++ )
+      for( int i = 0; i < text.Length; i++ )
       {
-         if ( char.IsWhiteSpace( text[i] ) )
+         if( char.IsWhiteSpace( text[i] ) )
          {
             inWord = false;
          }
-         else if ( !inWord )
+         else if( !inWord )
          {
             wordCount++;
             inWord = true;

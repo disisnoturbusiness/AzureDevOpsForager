@@ -214,15 +214,15 @@ public static class Config
 
    /// <summary>
    /// Azure DevOps organization URL, e.g. https://dev.azure.com/your-org. Seeded from the environment via
-   /// <see cref="Global._azureDevOpsUrl"/>; leaving it empty disables the Azure integration.
+   /// <see cref="Global.AzureDevOpsUrl"/>; leaving it empty disables the Azure integration.
    /// </summary>
-   public static string AzureUrl { get; set; } = Global._azureDevOpsUrl;
+   public static string AzureUrl { get; set; } = Global.AzureDevOpsUrl;
 
    /// <summary>
    /// Azure DevOps Personal Access Token used to authenticate against the organization. Seeded from the
-   /// environment via <see cref="Global._azureDevOpsPAT"/> so the secret is not baked into source.
+   /// environment via <see cref="Global.AzureDevOpsPat"/> so the secret is not baked into source.
    /// </summary>
-   public static string AzurePAT { get; set; } = Global._azureDevOpsPAT;
+   public static string AzurePAT { get; set; } = Global.AzureDevOpsPat;
 
    /// <summary>
    /// Azure DevOps project name (e.g. MyProject) within the organization.

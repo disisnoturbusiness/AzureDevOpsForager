@@ -480,31 +480,35 @@ public class Server
 
       // Embedding service: turn text into a vector using the server's ONNX model, so the indexer
       // (and anyone building an index) can embed remotely instead of shipping/loading a local model.
-      app.MapPost( "/embed", ( EmbedRequest request, IServiceProvider serviceProvider ) =>
+      app.MapPost( "/embed", async ( EmbedRequest request, IServiceProvider serviceProvider ) =>
       {
          var embedder = serviceProvider.GetService<IEmbedder>();
          if( embedder == null )
             return Results.Json( new { error = "Embedding not available on this server." }, statusCode: 503 );
 
+         // Await the async embed so a remote HF round-trip does not block this ASP.NET request thread
+         // on GetAwaiter().GetResult(); the local ONNX path completes synchronously either way.
          var text = request?.Text ?? "";
          var vector = string.Equals( request?.Kind, "query", StringComparison.OrdinalIgnoreCase )
-            ? embedder.EmbedQuery( text )
-            : embedder.EmbedPassage( text );
+            ? await embedder.EmbedQueryAsync( text )
+            : await embedder.EmbedPassageAsync( text );
          return Results.Json( new { vector } );
       } );
 
       // Batched embedding: same model, many texts in one request and one forward pass. The indexer uses
       // this to embed a file's chunks together instead of one HTTP round-trip and one model run per chunk.
-      app.MapPost( "/embed_batch", ( EmbedBatchRequest request, IServiceProvider serviceProvider ) =>
+      app.MapPost( "/embed_batch", async ( EmbedBatchRequest request, IServiceProvider serviceProvider ) =>
       {
          var embedder = serviceProvider.GetService<IEmbedder>();
          if( embedder == null )
             return Results.Json( new { error = "Embedding not available on this server." }, statusCode: 503 );
 
+         // Await the async batch so remote HF round-trips do not block this ASP.NET request thread;
+         // the local ONNX path completes synchronously either way.
          var texts = request?.Texts ?? System.Array.Empty<string>();
          var vectors = string.Equals( request?.Kind, "query", StringComparison.OrdinalIgnoreCase )
-            ? embedder.EmbedQueryBatch( texts )
-            : embedder.EmbedPassageBatch( texts );
+            ? await embedder.EmbedQueryBatchAsync( texts )
+            : await embedder.EmbedPassageBatchAsync( texts );
          return Results.Json( new { vectors } );
       } );
 
@@ -545,7 +549,7 @@ public class Server
                if( !sources.Contains( ids[i] ) ) sources.Add( ids[i] );
             }
 
-         var answer = await llmProvider.AskAsync( request.Question, contextBuilder.ToString(), null );
+         var answer = await llmProvider.AskAsync( request.Question, contextBuilder.ToString() );
          return Results.Json( new { answer, sources } );
       } );
 
@@ -617,6 +621,8 @@ Endpoints:
   POST /chat               - Ask a question; answer grounded in retrieved code (Groq)
   POST /chat/feedback      - Thumbs up/down on a chat answer
   POST /search_by_filename - Search by filename pattern
+  POST /embed              - Embed a single text (one vector)
+  POST /embed_batch        - Embed many texts in one call (one vector each)
   GET  /systems            - Distinct file-type facet counts
   GET  /health             - Health check
   GET  /collections        - Index stats

@@ -3,7 +3,7 @@ using System.IO;
 using System.Windows.Forms;
 using AzureDevOpsForager.Core;
 
-namespace AzureDevOpsForagerGroq.WinForms
+namespace AzureDevOpsForager.WinForms
 {
    /// <summary>
    /// Process entry point for the Groq flavour of the Azure DevOps Forager WinForms client.

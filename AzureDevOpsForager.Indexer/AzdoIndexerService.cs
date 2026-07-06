@@ -38,15 +38,34 @@ public class AzdoIndexerService : IDisposable
    /// <summary>Fully-qualified /embed endpoint; also serves as the "remote embedding configured" marker.</summary>
    private string _embedUrl;
 
-   /// <summary>Fully-qualified /embed_batch endpoint used to embed many chunks remotely in one call.</summary>
-   private string _embedBatchUrl;
-
-   /// <summary>Max chunks per /embed_batch call. Caps each forward pass so a single run never approaches the request timeout.</summary>
-   private const int EmbedBatchMaxChunks = 8;
-
    /// <summary>Max concurrent /embed calls on the REMOTE path. Tracks the hosted server's capacity, not the client's
    /// core count — a strong client at ProcessorCount-1 would otherwise swamp a small server and make it thrash.</summary>
    private const int RemoteEmbedMaxConcurrency = 4;
+
+   /// <summary>
+   /// Minimum fraction of the listed files that must land in staging before a full reindex is allowed to
+   /// promote (swap staging → live). A run that stages fewer than this is treated as partial and aborted so a
+   /// good live index is never clobbered by a bad build.
+   /// </summary>
+   private const double PromotionThresholdRatio = 0.95;
+
+   /// <summary>
+   /// Per-chunk character cap applied before embedding. A single chunk longer than this is truncated so one
+   /// oversized chunk cannot blow the embedding model's token budget.
+   /// </summary>
+   private const int MaxChunkChars = 5000;
+
+   /// <summary>
+   /// Number of times the source file-listing call is retried when it returns zero files. The Azure DevOps
+   /// listing API is occasionally flaky and returns an empty set transiently, so a few retries smooth it over.
+   /// </summary>
+   private const int ListingMaxAttempts = 4;
+
+   /// <summary>
+   /// Base backoff in milliseconds between empty-listing retries. Multiplied by the attempt number for a linear
+   /// backoff (attempt 1 waits one unit, attempt 2 waits two, and so on).
+   /// </summary>
+   private const int ListingRetryBackoffMs = 2000;
 
    /// <summary>Azure DevOps client, created when the source type is TFVC or Azure-hosted Git.</summary>
    private AzureDevOpsService _azure;
@@ -121,7 +140,7 @@ public class AzdoIndexerService : IDisposable
 
       // Completion guard: never promote a partial build over a good live index.
       var stagedCount = await SchemaInitializer.RowCountAsync( _connectionString, "CodeFiles_Staging" );
-      if( stagedCount < (long)( files.Count * 0.95 ) )
+      if( stagedCount < (long)( files.Count * PromotionThresholdRatio ) )
       {
          Console.WriteLine( $"[ABORT] Only {stagedCount:N0}/{files.Count:N0} files staged (< 95%) — live index left untouched (not swapping)." );
          return;
@@ -170,12 +189,12 @@ public class AzdoIndexerService : IDisposable
    /// <summary>List source files, retrying on a transient empty result (the AzDO listing API is occasionally flaky).</summary>
    private async Task<List<SourceFileInfo>> ListFilesWithRetryAsync()
    {
-      for( int attempt = 1; attempt <= 4; attempt++ )
+      for( int attempt = 1; attempt <= ListingMaxAttempts; attempt++ )
       {
          var files = await _source.GetAllFilesAsync();
          if( files.Count > 0 ) return files;
-         Console.WriteLine( $"[WARN] Listing returned 0 files (attempt {attempt}/4) — retrying..." );
-         await Task.Delay( 2000 * attempt );
+         Console.WriteLine( $"[WARN] Listing returned 0 files (attempt {attempt}/{ListingMaxAttempts}) — retrying..." );
+         await Task.Delay( ListingRetryBackoffMs * attempt );
       }
       Console.WriteLine( "[WARN] Listing still empty after retries." );
       return new List<SourceFileInfo>();
@@ -278,7 +297,6 @@ public class AzdoIndexerService : IDisposable
          _embedHttp = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes( 3 ) };
          var embedBase = Config.EmbeddingServiceUrl.TrimEnd( '/' );
          _embedUrl = embedBase + "/embed";
-         _embedBatchUrl = embedBase + "/embed_batch";
          Console.WriteLine( "         Embeddings: REMOTE (hosted service)" );
       }
       else
@@ -360,7 +378,7 @@ public class AzdoIndexerService : IDisposable
    }
 
    /// <summary>
-   /// Roslyn-chunks a single file, embeds each chunk (capped at 5000 chars per chunk), and inserts it.
+   /// Roslyn-chunks a single file, embeds each chunk (capped at <see cref="MaxChunkChars"/> chars per chunk), and inserts it.
    /// Any failure here is isolated per file: it is counted, logged to the error file, and swallowed so one
    /// bad file never aborts the whole parallel run.
    /// </summary>
@@ -373,7 +391,7 @@ public class AzdoIndexerService : IDisposable
          var chunks = new RoslynChunker().ChunkFile( file.RelativePath, content );
          foreach( var chunk in chunks )
          {
-            var chunkContent = chunk.Content.Length > 5000 ? chunk.Content.Substring( 0, 5000 ) : chunk.Content;
+            var chunkContent = chunk.Content.Length > MaxChunkChars ? chunk.Content.Substring( 0, MaxChunkChars ) : chunk.Content;
             var embedding = await EmbedPassageSingleAsync( chunkContent );
             InsertCodeChunk( connection, codeFileId, chunk, chunkContent, embedding, isFullReindex );
          }
@@ -396,38 +414,6 @@ public class AzdoIndexerService : IDisposable
       var remaining = ( totalFiles - processedCount ) / Math.Max( 1.0, rate );
       var eta = remaining >= 1 ? $"~{remaining:F0} min remaining" : "~<1 min remaining";
       Console.WriteLine( $"         Processed {processedCount:N0}/{totalFiles:N0} ({rate:F0}/min, {eta})" );
-   }
-
-   /// <summary>
-   /// Embed a whole file's passage chunks in one batched call: in-process via the local model when
-   /// configured, otherwise a single POST to the hosted /embed_batch service. Returns one vector per
-   /// input text, in the same order.
-   /// </summary>
-   private async Task<List<float[]>> EmbedPassageBatchAsync( IReadOnlyList<string> texts )
-   {
-      if( _localEmbed != null )
-         return _localEmbed.EmbedPassageBatch( texts );
-
-      if( _hfEmbedder != null )
-      {
-         var hfResults = new List<float[]>( texts.Count );
-         foreach( var passage in texts )
-            hfResults.Add( await _hfEmbedder.EmbedPassageAsync( passage ) );
-         return hfResults;
-      }
-
-      var requestBody = new System.Net.Http.StringContent(
-         JsonConvert.SerializeObject( new { texts, kind = "passage" } ),
-         System.Text.Encoding.UTF8, "application/json" );
-      using var response = await _embedHttp.PostAsync( _embedBatchUrl, requestBody );
-      response.EnsureSuccessStatusCode();
-      var json = await response.Content.ReadAsStringAsync();
-      var vectorsArray = Newtonsoft.Json.Linq.JObject.Parse( json )["vectors"] as Newtonsoft.Json.Linq.JArray;
-      var results = new List<float[]>();
-      if( vectorsArray != null )
-         foreach( var vector in vectorsArray )
-            results.Add( ( (Newtonsoft.Json.Linq.JArray)vector ).Select( token => (float)token ).ToArray() );
-      return results;
    }
 
    /// <summary>

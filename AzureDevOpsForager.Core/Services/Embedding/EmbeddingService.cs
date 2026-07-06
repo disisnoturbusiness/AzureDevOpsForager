@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using AzureDevOpsForager.Core.Models.Embedding;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -176,6 +177,32 @@ public class EmbeddingService : IDisposable, IEmbedder
    }
 
    /// <summary>
+   /// Async form of <see cref="EmbedQuery"/>. The local ONNX model runs in-process with no I/O to await,
+   /// so this completes synchronously and simply wraps the computed vector in a already-completed task.
+   /// It exists to satisfy <see cref="IEmbedder"/> so the server hot path can await embedding uniformly
+   /// regardless of whether the local or the remote (Hugging Face) implementation is wired in.
+   /// </summary>
+   public Task<float[]> EmbedQueryAsync( string text ) => Task.FromResult( EmbedQuery( text ) );
+
+   /// <summary>
+   /// Async form of <see cref="EmbedPassage"/>. In-process ONNX inference has nothing to await, so this
+   /// completes synchronously; it exists only to satisfy the async side of <see cref="IEmbedder"/>.
+   /// </summary>
+   public Task<float[]> EmbedPassageAsync( string text ) => Task.FromResult( EmbedPassage( text ) );
+
+   /// <summary>
+   /// Async form of <see cref="EmbedQueryBatch"/>. In-process ONNX inference has nothing to await, so this
+   /// completes synchronously; it exists only to satisfy the async side of <see cref="IEmbedder"/>.
+   /// </summary>
+   public Task<List<float[]>> EmbedQueryBatchAsync( IReadOnlyList<string> texts ) => Task.FromResult( EmbedQueryBatch( texts ) );
+
+   /// <summary>
+   /// Async form of <see cref="EmbedPassageBatch"/>. In-process ONNX inference has nothing to await, so this
+   /// completes synchronously; it exists only to satisfy the async side of <see cref="IEmbedder"/>.
+   /// </summary>
+   public Task<List<float[]>> EmbedPassageBatchAsync( IReadOnlyList<string> texts ) => Task.FromResult( EmbedPassageBatch( texts ) );
+
+   /// <summary>
    /// Measures how similar two embedding vectors are using cosine similarity, i.e. the cosine of the
    /// angle between them. Returns a value in roughly [-1, 1] where 1 means identical direction (most
    /// similar) and 0 means unrelated; this is the score search ranking is built on. Returns 0 when
@@ -326,7 +353,9 @@ public class EmbeddingService : IDisposable, IEmbedder
       int sequenceLength = 1;
       for( int i = 0; i < texts.Count; i++ )
       {
-         var raw = string.IsNullOrWhiteSpace( texts[i] ) ? " " : prefix + texts[i];
+         // Keep the E5 prefix even for a blank chunk so a whitespace input embeds the same way the
+         // scalar EmbedPassage / EmbedQuery path would (prefix + " "), not a bare unprefixed space.
+         var raw = string.IsNullOrWhiteSpace( texts[i] ) ? prefix + " " : prefix + texts[i];
          tokenized[i] = _tokenizer.Tokenize( raw, _maxLength );
          if( tokenized[i].InputIds.Length > sequenceLength )
             sequenceLength = tokenized[i].InputIds.Length;

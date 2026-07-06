@@ -27,6 +27,13 @@ public class HybridSearchService : IDisposable
 {
    #region Data Members
 
+   /// <summary>
+   /// Minimum trimmed length a question must have before it is used as a filename search term in the
+   /// full-text-only fallback. Below this, the LIKE pattern SearchByFilename builds is too broad to be
+   /// meaningful (an empty term becomes LIKE '%%', matching every file), so the filename merge is skipped.
+   /// </summary>
+   private const int MinFilenameSearchLength = 2;
+
    /// <summary>Full-text (keyword) search path and filename lookups. Owned and disposed here.</summary>
    private readonly SqlFtsService _ftsService;
 
@@ -86,7 +93,7 @@ public class HybridSearchService : IDisposable
          {
             try
             {
-               var queryVector = _embeddingService.EmbedQuery( request.Question );
+               var queryVector = await _embeddingService.EmbedQueryAsync( request.Question );
                return await SearchViaProcAsync( queryVector, request );
             }
             catch( Exception vectorException )
@@ -294,11 +301,17 @@ public class HybridSearchService : IDisposable
    {
       var ftsResults = _ftsService.Search( request.Question, request.ModuleFilter, null, Math.Max( request.NResults * 4, 20 ) );
 
-      // Always fold in filename matches, adding only files the keyword search hasn't already returned.
-      var existingPaths = new HashSet<string>( ftsResults.Select( r => r.FilePath ) );
-      foreach( var filenameHit in _ftsService.SearchByFilename( request.Question, request.NResults ) )
-         if( existingPaths.Add( filenameHit.FilePath ) )
-            ftsResults.Add( filenameHit );
+      // Fold in filename matches, adding only files the keyword search hasn't already returned. Skip
+      // this merge for a null/whitespace/too-short question: SearchByFilename builds a LIKE pattern,
+      // so an empty term degrades to LIKE '%%' and would return every file indiscriminately.
+      var question = request.Question;
+      if( !string.IsNullOrWhiteSpace( question ) && question.Trim().Length >= MinFilenameSearchLength )
+      {
+         var existingPaths = new HashSet<string>( ftsResults.Select( r => r.FilePath ) );
+         foreach( var filenameHit in _ftsService.SearchByFilename( question, request.NResults ) )
+            if( existingPaths.Add( filenameHit.FilePath ) )
+               ftsResults.Add( filenameHit );
+      }
 
       var combined = CombineResults( ftsResults, null, request.NResults, request.Question );
       var documents = combined.Select( ( r, i ) => i == 0 ? r.Content : TruncateContent( r.Content ) ).ToList();

@@ -113,6 +113,10 @@
       healthEl.classList.add("bad");
       healthEl.classList.remove("ok");
       healthText.textContent = "backend unreachable";
+      // The backend may just be cold-starting (scale-to-zero app + serverless SQL).
+      // Re-poll on a slow cadence so the pill self-heals instead of freezing on the
+      // first failed check. Success schedules nothing, so this stops once it's up.
+      setTimeout(loadHealth, 30000);
     }
   }
 

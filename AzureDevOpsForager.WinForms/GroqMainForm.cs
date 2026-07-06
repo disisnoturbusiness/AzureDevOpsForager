@@ -6,7 +6,7 @@ using AzureDevOpsForager.Shared.UI;
 
 #pragma warning disable VSTHRD100
 
-namespace AzureDevOpsForagerGroq.WinForms
+namespace AzureDevOpsForager.WinForms
 {
    /// <summary>
    /// Main window for the Groq-backed Azure DevOps Forager chat client.
@@ -21,14 +21,14 @@ namespace AzureDevOpsForagerGroq.WinForms
 
       /// <summary>
       /// Builds the form, wires it to a Groq chat backend, and greets the user.
-      /// Titles the window, hands a fresh <see cref="GroqChatService"/> to the base class so all
+      /// Titles the window, hands a fresh <see cref="BaseChatService"/> to the base class so all
       /// shared UI events are bound, then posts an intro message explaining the privacy model
       /// (code is retrieved server-side; only the question plus retrieved snippets reach the LLM).
       /// </summary>
       public GroqMainForm()
       {
          this.Text = "Azure DevOps Forager — Chat";
-         InitializeBaseForm( new GroqChatService() );
+         InitializeBaseForm( new BaseChatService() );
 
          AppendToChat( "SYSTEM",
             "Azure DevOps Forager chat ready.\n" +
@@ -88,15 +88,7 @@ namespace AzureDevOpsForagerGroq.WinForms
          {
             AppendToChat( "SYSTEM", "🔄 Bad answer - retrying with more detail...", Color.DarkOrange );
 
-            // The retry path only exists on the Groq service; bail out clearly if we're wired to something else.
-            var groqService = _chatService as GroqChatService;
-            if( groqService == null )
-            {
-               AppendToChat( "ERROR", "Service is not GroqChatService - cannot retry", Color.Red );
-               return;
-            }
-
-            var retryAnswer = await groqService.RetryWithMoreDetailAsync( _lastQuestion );
+            var retryAnswer = await _chatService.RetryWithMoreDetailAsync( _lastQuestion );
             AppendToChat( "AI", retryAnswer, Color.Green );
             _lastAnswer = retryAnswer;
 
