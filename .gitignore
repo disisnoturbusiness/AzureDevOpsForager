@@ -1,0 +1,51 @@
+# ---- Build output ----
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+
+# ---- Local config (may contain SQL connection strings / tokens) ----
+config.json
+**/config.json
+
+# ---- Secrets: the encrypted secrets store (Groq key, HF token, ...) never gets committed ----
+secrets.enc
+**/secrets.enc
+groqapikey.enc
+**/groqapikey.enc
+groqapikey.txt
+**/groqapikey.txt
+
+# ---- Models: large binaries, fetched via models/download-models.ps1 ----
+models/**/*.onnx
+models/**/*.model
+models/**/*.bin
+models/**/*.safetensors
+models/**/vocab.txt
+models/**/tokenizer.json
+models/**/sentencepiece.bpe.model
+
+# ---- Runtime / generated ----
+logs/
+*.log
+chunkerrors.txt
+azdo_last_update.json
+last_update.json
+known_answers.json
+chat_feedback.log
+
+# ---- Throwaway / local-only ----
+_e2e/
+.shelf/
+
+# VS source-control bindings (never commit)
+*.vspscc
+*.vssscc
+
+# ---- Python build artifacts (docs/build_word_docs.py) ----
+__pycache__/
+*.pyc
+
+# ---- Personal demo deploy (targets a specific Azure resource; not part of the give-away) ----
+scripts/publish-demo.ps1

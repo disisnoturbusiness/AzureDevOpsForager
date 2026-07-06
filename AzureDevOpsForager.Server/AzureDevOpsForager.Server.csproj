@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup Label="Globals">
+    <SccProjectName>SAK</SccProjectName>
+    <SccProvider>SAK</SccProvider>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccLocalPath>SAK</SccLocalPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <OutputType>Exe</OutputType>
+    <LangVersion>latest</LangVersion>
+    
+    <!-- Windows Service support -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AzureDevOpsForager.Core\AzureDevOpsForager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the web UI alongside the exe so `dotnet build` + run works, not just publish.
+         wwwroot is already implicitly Content under the Web SDK; this only adds the copy. -->
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the service install/uninstall scripts next to the exe (right-click -> Run as administrator). -->
+    <None Include="install-service.cmd" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="uninstall-service.cmd" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Windows Service hosting -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <!-- Align System.Text.Json with Microsoft.ML.Tokenizers (reranker) — avoids the 8.0/9.0 conflict. -->
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

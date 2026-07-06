@@ -1,0 +1,38 @@
+{
+  "_comment": "Copy this file to 'config.json' next to the Server and Indexer executables, then edit. config.json is gitignored because it can hold a SQL connection string and tokens. All values are strings (the loader parses numbers/bools).",
+
+  "ServerUrl": "http://localhost:8000",
+  "Port": "8000",
+
+  "SqlConnectionString": "Server=YOURSERVER;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
+  "AzdoVectorConnectionString": "Server=YOURSERVER;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
+
+  "OnnxModelPath": "models/e5-large-v2/e5-large-v2.onnx",
+  "RerankerModelPath": "models/bge-reranker-v2-m3-onnx/model.onnx",
+  "RerankerEnabled": "true",
+  "RerankerInputSize": "30",
+
+  "_comment_huggingface": "Optional: embed + rank via Hugging Face Inference Endpoints instead of local ONNX. Set the two URLs below and store the token with 'Server --set-secret HF_TOKEN hf_xxx' (or the HF_TOKEN env var). Leave the URLs blank to use the local ONNX models above.",
+  "HuggingFaceEmbedUrl": "",
+  "HuggingFaceRerankUrl": "",
+
+  "SourceType": "github",
+  "GitHubRepoUrl": "https://github.com/dotnet-architecture/eShopOnWeb",
+  "GitBranch": "",
+  "GitHubToken": "",
+
+  "AzureUrl": "https://dev.azure.com/your-org",
+  "AzurePAT": "",
+  "AzureProject": "",
+  "AzureTfvcRoot": "",
+  "GitRepository": "",
+
+  "IncludeGlobs": "**/*.cs",
+  "ExcludeGlobs": "**/bin/**;**/obj/**",
+
+  "RrfVectorWeight": "60",
+  "RrfChunkFtsWeight": "30",
+  "RrfFileFtsWeight": "30",
+  "MinFtsRank": "10",
+  "MaxVectorDistance": "0.5"
+}

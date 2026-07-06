@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="AzureDevOpsForager.Core/AzureDevOpsForager.Core.csproj" />
+  <Project Path="AzureDevOpsForager.Shared/AzureDevOpsForager.Shared.csproj" />
+  <Project Path="AzureDevOpsForager.Indexer/AzureDevOpsForager.Indexer.csproj" />
+  <Project Path="AzureDevOpsForager.Server/AzureDevOpsForager.Server.csproj" />
+  <Project Path="AzureDevOpsForager.WinForms/AzureDevOpsForager.WinForms.csproj" />
+  <Project Path="AzureDevOpsForager.Tests/AzureDevOpsForager.Tests.csproj" />
+</Solution>
