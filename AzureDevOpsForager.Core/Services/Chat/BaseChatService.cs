@@ -214,6 +214,30 @@ public class BaseChatService
    }
 
    /// <summary>
+   /// Best-effort keep-warm: posts a tiny query to the server's /query endpoint so the
+   /// scale-to-zero embedding and reranking endpoints (and the serverless database) stay hot
+   /// while a desktop window is open. A single /query exercises the whole retrieval chain —
+   /// server, database, embed, and rerank — so one call warms all of it. Any failure is
+   /// swallowed on purpose: a keep-warm ping is best-effort and must never surface to the user;
+   /// the next heartbeat (or the user's next real question) warms things regardless.
+   /// </summary>
+   public async Task WarmupAsync()
+   {
+      try
+      {
+         var requestBody = new { question = "warmup keepalive", nResults = 1 };
+         var json = JsonConvert.SerializeObject( requestBody );
+         var content = new StringContent( json, Encoding.UTF8, "application/json" );
+
+         await _httpClient.PostAsync( Config.ServerUrl.TrimEnd( '/' ) + "/query", content );
+      }
+      catch
+      {
+         // Intentional no-op: keep-warm is best-effort; never nag the user about a warm-up ping.
+      }
+   }
+
+   /// <summary>
    /// Turns the server's "sources" array into a short, bulleted list to append beneath an
    /// answer. This is deliberately forgiving: the server's source objects have historically
    /// used several different property names for the path, so we accept the first of a few

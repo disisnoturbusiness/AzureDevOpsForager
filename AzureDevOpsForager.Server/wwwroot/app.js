@@ -516,9 +516,39 @@
   }
 
   // ===================================================================
+  // keep-warm heartbeat
+  // While a tab is open, ping /query every 10 min so the scale-to-zero HF embed/rerank
+  // endpoints and the serverless SQL stay hot for whoever's looking. One /query exercises
+  // the whole chain (site -> SQL -> embed -> rerank), so it warms all three in a single
+  // call. This runs only in a live tab, so it costs nothing when nobody has the site open —
+  // the backend just cools back down on its own.
+  // ===================================================================
+  const HEARTBEAT_MS = 10 * 60 * 1000; // 10 minutes
+  let heartbeatBusy = false;
+
+  async function heartbeat() {
+    if (heartbeatBusy) return;              // don't stack pings if one runs long (cold start)
+    heartbeatBusy = true;
+    healthText.textContent = "keeping warm…";
+    try {
+      await fetch("/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ question: "warmup keepalive", nResults: 1 })
+      });
+      await loadHealth();                   // refresh the pill with live counts — proof it's warm
+    } catch (_) {
+      /* best-effort; the next tick tries again — loadHealth on the next beat repairs the pill */
+    } finally {
+      heartbeatBusy = false;
+    }
+  }
+
+  // ===================================================================
   // boot
   // ===================================================================
   loadHealth();
   loadSystems();
   searchInput.focus();
+  setInterval(heartbeat, HEARTBEAT_MS);
 })();

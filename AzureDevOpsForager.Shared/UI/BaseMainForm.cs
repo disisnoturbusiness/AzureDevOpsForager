@@ -57,6 +57,16 @@ public abstract partial class BaseMainForm : Form
    /// <summary>The most recent answer that was displayed; retained so it can be cached or logged when rated.</summary>
    protected string _lastAnswer;
 
+   /// <summary>How often the keep-warm heartbeat re-warms the server while this window is open (10 minutes).</summary>
+   private const int KeepWarmIntervalMs = 10 * 60 * 1000;
+
+   /// <summary>
+   /// Fires a background warm-up ping every <see cref="KeepWarmIntervalMs"/> ms while this window is open, so
+   /// the scale-to-zero server endpoints stay hot for the whole session instead of going cold after a few
+   /// minutes idle. Created in <see cref="InitializeBaseForm"/> and disposed when the form closes.
+   /// </summary>
+   private System.Windows.Forms.Timer _keepWarmTimer;
+
    #endregion Data Members
 
    #region Constructor
@@ -85,6 +95,9 @@ public abstract partial class BaseMainForm : Form
       ThumbsDownButtonControl.Click += ThumbsDownButton_Click;
       NotWhatIWantButtonControl.Click += NotWhatIWantButton_Click;
       QuestionTextBoxControl.KeyDown += QuestionBox_KeyDown;
+
+      // Keep the scale-to-zero server endpoints hot for as long as this window stays open.
+      InitializeKeepWarm();
    }
 
    #endregion Constructor
@@ -118,6 +131,34 @@ public abstract partial class BaseMainForm : Form
 
    /// <summary>The status label the base logic writes progress and outcome messages to.</summary>
    protected virtual Label StatusLabelControl => _statusLabel;
+
+   // --- Keep-warm heartbeat ----------------------------------------------
+
+   /// <summary>
+   /// Starts the keep-warm heartbeat: every <see cref="KeepWarmIntervalMs"/> ms, while this window is
+   /// open, fire a best-effort warm-up against the server so an idle-but-open session never pays a cold
+   /// start on the next question. The timer is stopped and disposed when the form closes.
+   /// </summary>
+   private void InitializeKeepWarm()
+   {
+      _keepWarmTimer = new System.Windows.Forms.Timer { Interval = KeepWarmIntervalMs };
+      _keepWarmTimer.Tick += KeepWarmTimer_Tick;
+      _keepWarmTimer.Start();
+      FormClosed += StopKeepWarm;
+   }
+
+   /// <summary>Timer tick: fire the server warm-up in the background (fire-and-forget; never blocks the UI).</summary>
+   private void KeepWarmTimer_Tick( object sender, EventArgs e )
+   {
+      _ = _chatService.WarmupAsync();
+   }
+
+   /// <summary>Stops and disposes the keep-warm timer when the form closes so it never outlives the window.</summary>
+   private void StopKeepWarm( object sender, FormClosedEventArgs e )
+   {
+      _keepWarmTimer?.Stop();
+      _keepWarmTimer?.Dispose();
+   }
 
    // --- Event handlers ----------------------------------------------------
 
