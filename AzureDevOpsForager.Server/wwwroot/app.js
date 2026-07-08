@@ -68,6 +68,15 @@
     return digits == null ? n : n.toFixed(digits);
   }
 
+  // Human-readable elapsed time: milliseconds under a second, seconds above it (one decimal
+  // for single-digit seconds so quick queries still read precisely; whole seconds beyond that).
+  // Keeps a cold-start "116466 ms" from reading as noise — it shows "116 s" instead.
+  function formatDuration(ms) {
+    if (ms < 1000) return Math.round(ms) + " ms";
+    const s = ms / 1000;
+    return (s < 10 ? s.toFixed(1) : Math.round(s)) + " s";
+  }
+
   // Split "Some\\Path\\File.cs" -> show last segment emphasized
   function renderPath(path, ns) {
     if (!path) return "";
@@ -212,7 +221,7 @@
   function renderResults(ids, docs, metas, ms) {
     resultsEl.innerHTML = "";
     if (!ids.length) {
-      searchStatus.textContent = `no results in ${ms} ms`;
+      searchStatus.textContent = `no results in ${formatDuration(ms)}`;
       searchEmpty.style.display = "block";
       searchEmpty.querySelector(".empty-glyph").textContent = "∅";
       searchEmpty.querySelector("p").textContent = "No matches found. Try broadening the query or clearing the filters.";
@@ -220,7 +229,7 @@
     }
 
     searchStatus.innerHTML =
-      `<span class="hl">${ids.length}</span> result${ids.length === 1 ? "" : "s"} in <span class="hl">${ms}</span> ms`;
+      `<span class="hl">${ids.length}</span> result${ids.length === 1 ? "" : "s"} in <span class="hl">${formatDuration(ms)}</span>`;
 
     ids.forEach((path, i) => {
       const meta = metas[i] || {};
