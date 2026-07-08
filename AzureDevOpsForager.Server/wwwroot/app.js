@@ -68,13 +68,16 @@
     return digits == null ? n : n.toFixed(digits);
   }
 
-  // Human-readable elapsed time: milliseconds under a second, seconds above it (one decimal
-  // for single-digit seconds so quick queries still read precisely; whole seconds beyond that).
-  // Keeps a cold-start "116466 ms" from reading as noise — it shows "116 s" instead.
+  // Human-readable elapsed time: ms under a second, "3.2 s" for single-digit seconds, whole
+  // seconds up to a minute, then "1m 56s" past a minute — so a cold start reads as its real
+  // magnitude ("1m 56s", clearly under 2 min) instead of a wall of digits or an ambiguous "116 s".
   function formatDuration(ms) {
     if (ms < 1000) return Math.round(ms) + " ms";
-    const s = ms / 1000;
-    return (s < 10 ? s.toFixed(1) : Math.round(s)) + " s";
+    const totalSec = ms / 1000;
+    if (totalSec < 10) return totalSec.toFixed(1) + " s";        // e.g. 3.2 s
+    const whole = Math.round(totalSec);
+    if (whole < 60) return whole + " s";                         // e.g. 45 s
+    return Math.floor(whole / 60) + "m " + (whole % 60) + "s";   // e.g. 1m 56s
   }
 
   // Split "Some\\Path\\File.cs" -> show last segment emphasized
