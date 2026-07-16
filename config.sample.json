@@ -7,12 +7,14 @@
   "SqlConnectionString": "Server=YOURSERVER;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
   "AzdoVectorConnectionString": "Server=YOURSERVER;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
 
+  "_comment_models": "EmbeddingDimension must match the embedding model: 1024 for the local e5-large-v2 ONNX below, 1536 for the hosted bge-code-v1 HF endpoint (the code default). Changing models requires a full reindex.",
   "OnnxModelPath": "models/e5-large-v2/e5-large-v2.onnx",
+  "EmbeddingDimension": "1024",
   "RerankerModelPath": "models/bge-reranker-v2-m3-onnx/model.onnx",
   "RerankerEnabled": "true",
   "RerankerInputSize": "30",
 
-  "_comment_huggingface": "Optional: embed + rank via Hugging Face Inference Endpoints instead of local ONNX. Set the two URLs below and store the token with 'Server --set-secret HF_TOKEN hf_xxx' (or the HF_TOKEN env var). Leave the URLs blank to use the local ONNX models above.",
+  "_comment_huggingface": "Optional: embed + rank via Hugging Face Inference Endpoints instead of local ONNX (this is how the hosted demo runs: BAAI/bge-code-v1 embeddings on TEI + Qwen3-Reranker-4B-seq-cls on vLLM). Set the two URLs below (and EmbeddingDimension to 1536 for bge-code-v1), then store the token with 'Server --set-secret HF_TOKEN hf_xxx' (or the HF_TOKEN env var). Leave the URLs blank to use the local ONNX models above.",
   "HuggingFaceEmbedUrl": "",
   "HuggingFaceRerankUrl": "",
 

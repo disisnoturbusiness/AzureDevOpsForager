@@ -6,8 +6,9 @@ namespace AzureDevOpsForager.Core.Services.Search;
 
 /// <summary>
 /// Read side of the vector-search stack backed by SQL Server 2025's native vector engine.
-/// The code corpus is embedded with the E5-large-v2 model (1024 dimensions) and stored in a
-/// VECTOR(1024) column, so similarity ranking runs inside the database via VECTOR_SEARCH
+/// The code corpus is embedded with the configured model (bge-code-v1 at 1536 dimensions on the
+/// hosted path; local e5-large-v2 at 1024) and stored in a VECTOR(n) column sized by
+/// Config.EmbeddingDimension, so similarity ranking runs inside the database via VECTOR_SEARCH
 /// (DiskANN index, TOP_N) using cosine distance rather than being pulled back to the client.
 /// This class holds the connection details for that store and exposes lightweight health/stats
 /// lookups against it. Implements IDisposable so callers can use it inside a using block, even

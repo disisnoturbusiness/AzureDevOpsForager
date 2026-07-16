@@ -521,7 +521,7 @@ public class AzdoIndexerService : IDisposable
 
       var sql = $@"
          INSERT INTO dbo.CodeChunks{_tableSuffix} (CodeFileId, ChunkKey, ChunkType, ChunkName, StartLine, EndLine, ChunkContent, Embedding, Namespace, ClassName, Signature, ParentContext)
-         VALUES (@codeFileId, @chunkKey, @chunkType, @chunkName, @startLine, @endLine, @chunkContent, CAST(@embedding AS VECTOR(1024)), @namespace, @className, @signature, @parentContext)";
+         VALUES (@codeFileId, @chunkKey, @chunkType, @chunkName, @startLine, @endLine, @chunkContent, CAST(@embedding AS VECTOR({Config.EmbeddingDimension})), @namespace, @className, @signature, @parentContext)";
 
       using var command = new SqlCommand( sql, connection );
       command.Parameters.AddWithValue( "@codeFileId", codeFileId );

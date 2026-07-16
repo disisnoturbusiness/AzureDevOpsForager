@@ -73,11 +73,13 @@ KEY INDEX PK_CodeChunks ON CODEINDEX_FTC WITH (CHANGE_TRACKING AUTO);";
    /// The hybrid search stored procedure. It fuses three ranked signals (DiskANN vector similarity,
    /// chunk-level full-text, file-level full-text) with Reciprocal Rank Fusion in a single round-trip, so
    /// the client gets one already-scored result set. Declared CREATE OR ALTER so re-running is idempotent.
+   /// The @QueryVector dimension follows <see cref="Config.EmbeddingDimension"/> so the proc always
+   /// matches the embedding model in use (bge-code-v1 = 1536; local e5-large-v2 = 1024).
    /// </summary>
-   private const string SearchCodeProcDdl = @"
+   private static string SearchCodeProcDdl => $@"
 CREATE OR ALTER PROCEDURE dbo.SearchCode
    @SearchText     NVARCHAR(4000),
-   @QueryVector    VECTOR(1024),
+   @QueryVector    VECTOR({Config.EmbeddingDimension}),
    @TopN           INT = 20,
    @ChunkType      NVARCHAR(50) = NULL,
    @VectorWeight   INT = 60,
@@ -461,9 +463,9 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
       command.CommandText = $@"
             SET QUOTED_IDENTIFIER ON;
             DROP TABLE IF EXISTS dbo.[{smokeTable}];
-            CREATE TABLE dbo.[{smokeTable}] (Id INT IDENTITY(1,1) CONSTRAINT PK_{smokeTable} PRIMARY KEY, Embedding VECTOR(1024) NOT NULL);
+            CREATE TABLE dbo.[{smokeTable}] (Id INT IDENTITY(1,1) CONSTRAINT PK_{smokeTable} PRIMARY KEY, Embedding VECTOR({Config.EmbeddingDimension}) NOT NULL);
             INSERT INTO dbo.[{smokeTable}] (Embedding)
-               SELECT CAST('[' + STRING_AGG(CAST(0.0 AS VARCHAR(5)), ',') + ']' AS VECTOR(1024)) FROM (SELECT TOP 1024 1 AS n FROM sys.all_objects) x;
+               SELECT CAST('[' + STRING_AGG(CAST(0.0 AS VARCHAR(5)), ',') + ']' AS VECTOR({Config.EmbeddingDimension})) FROM (SELECT TOP {Config.EmbeddingDimension} 1 AS n FROM sys.all_objects) x;
             CREATE VECTOR INDEX IX_{smokeTable}_Embedding ON dbo.[{smokeTable}](Embedding) WITH (metric='cosine', type='diskann');
             DROP TABLE dbo.[{smokeTable}];";
       try
@@ -645,7 +647,7 @@ CREATE TABLE dbo.CodeChunks{suffix}
    StartLine     INT               NOT NULL,
    EndLine       INT               NOT NULL,
    ChunkContent  NVARCHAR(MAX)     NOT NULL,
-   Embedding     VECTOR(1024)      NULL,
+   Embedding     VECTOR({Config.EmbeddingDimension})      NULL,
    Namespace     NVARCHAR(500)     NULL,
    ClassName     NVARCHAR(200)     NULL,
    Signature     NVARCHAR(MAX)     NULL,

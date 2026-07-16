@@ -8,12 +8,14 @@ using Newtonsoft.Json.Linq;
 
 namespace AzureDevOpsForager.Core.Services.Embedding;
 /// <summary>
-/// Remote <see cref="IEmbedder"/> backed by a Hugging Face Inference Endpoint serving e5-large-v2.
-/// Instead of loading the ~1.3 GB ONNX model in-process, it POSTs {"inputs":"passage: ..."} with a
-/// bearer token to the endpoint and reads back the flat 1024-float vector. It applies the same E5
-/// "query: " / "passage: " prefixes as the local service and L2-normalizes the result, so its vectors
-/// are interchangeable with the local model's and cosine ranking stays valid. This is what lets the
-/// Server and Indexer run with zero local ONNX.
+/// Remote <see cref="IEmbedder"/> backed by a Hugging Face Inference Endpoint serving BAAI/bge-code-v1,
+/// a code-specialized 1536-dim embedder (Qwen2.5-Coder backbone, 32k context) served by TEI. Instead of
+/// loading a multi-GB model in-process, it POSTs {"inputs":"..."} with a bearer token to the endpoint and
+/// reads back the flat float vector. Per the bge-code-v1 model card, queries are wrapped in the model's
+/// "&lt;instruct&gt;{task}\n&lt;query&gt;{text}" prompt (the task comes from
+/// <see cref="Config.EmbeddingQueryInstruction"/>) while documents/passages are embedded raw. Results are
+/// L2-normalized so cosine ranking stays valid. This is what lets the Server and Indexer run with zero
+/// local ONNX.
 /// </summary>
 public class HuggingFaceEmbedder : IEmbedder, IDisposable
 {
@@ -43,19 +45,20 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
    #region Public Methods (IEmbedder)
 
    /// <summary>
-   /// Embeds a search query by POSTing "query: {text}" to the HF endpoint and returning the
-   /// unit-length 1024-dim vector. Synchronous convenience wrapper over <see cref="EmbedQueryAsync"/>;
+   /// Embeds a search query by POSTing the bge-code-v1 instruction-wrapped prompt to the HF endpoint and
+   /// returning the unit-length vector. Synchronous convenience wrapper over <see cref="EmbedQueryAsync"/>;
    /// it blocks the calling thread on the network round-trip, so prefer the async form on request
    /// threads (the server hot path uses the async members for exactly this reason).
    /// </summary>
-   public float[] EmbedQuery( string text ) => EmbedAsync( "query: " + text ).GetAwaiter().GetResult();
+   public float[] EmbedQuery( string text ) => EmbedQueryAsync( text ).GetAwaiter().GetResult();
 
    /// <summary>
-   /// Embeds a passage / code chunk by POSTing "passage: {text}" to the HF endpoint and returning the
-   /// unit-length 1024-dim vector. Synchronous convenience wrapper over <see cref="EmbedPassageAsync"/>;
-   /// it blocks the calling thread on the network round-trip, so prefer the async form on request threads.
+   /// Embeds a passage / code chunk by POSTing the raw text to the HF endpoint and returning the
+   /// unit-length vector (bge-code-v1 documents take no instruction prefix). Synchronous convenience
+   /// wrapper over <see cref="EmbedPassageAsync"/>; it blocks the calling thread on the network
+   /// round-trip, so prefer the async form on request threads.
    /// </summary>
-   public float[] EmbedPassage( string text ) => EmbedAsync( "passage: " + text ).GetAwaiter().GetResult();
+   public float[] EmbedPassage( string text ) => EmbedPassageAsync( text ).GetAwaiter().GetResult();
 
    /// <summary>
    /// Embeds many queries by calling <see cref="EmbedQuery"/> per item (the HF endpoint takes one
@@ -85,11 +88,14 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
 
    #region Async (IEmbedder + Indexer's async embed loop)
 
-   /// <summary>Async passage embed for the Indexer's parallel loop (adds the "passage: " prefix).</summary>
-   public Task<float[]> EmbedPassageAsync( string text ) => EmbedAsync( "passage: " + text );
+   /// <summary>Async passage embed for the Indexer's parallel loop (documents are embedded raw, per the model card).</summary>
+   public Task<float[]> EmbedPassageAsync( string text ) => EmbedAsync( text );
 
-   /// <summary>Async query embed (adds the "query: " prefix).</summary>
-   public Task<float[]> EmbedQueryAsync( string text ) => EmbedAsync( "query: " + text );
+   /// <summary>Async query embed (wraps the text in the bge-code-v1 "&lt;instruct&gt;/&lt;query&gt;" prompt).</summary>
+   public Task<float[]> EmbedQueryAsync( string text ) =>
+      string.IsNullOrWhiteSpace( text )
+         ? Task.FromResult( new float[Config.EmbeddingDimension] )
+         : EmbedAsync( $"<instruct>{Config.EmbeddingQueryInstruction}\n<query>{text}" );
 
    /// <summary>
    /// Async form of <see cref="EmbedQueryBatch"/>: awaits each query embed in turn so a request thread
@@ -132,13 +138,15 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
 
    #region Private Methods
 
-   /// <summary>POSTs {"inputs": prefixedText} to the endpoint (with warm-up retry), parses the vector, and L2-normalizes it.</summary>
-   private async Task<float[]> EmbedAsync( string prefixedText )
+   /// <summary>POSTs {"inputs": text} to the endpoint (with warm-up retry), parses the vector, and L2-normalizes it.</summary>
+   private async Task<float[]> EmbedAsync( string text )
    {
-      if( string.IsNullOrWhiteSpace( prefixedText ) )
+      if( string.IsNullOrWhiteSpace( text ) )
          return new float[Config.EmbeddingDimension];
 
-      var payload = JsonConvert.SerializeObject( new { inputs = prefixedText } );
+      // truncate:true lets TEI clip inputs beyond the model's context window instead of erroring; with
+      // bge-code-v1's 32k window a Roslyn chunk should never actually hit it, so this is a safety net.
+      var payload = JsonConvert.SerializeObject( new { inputs = text, truncate = true } );
       var body = await PostWithWarmupRetryAsync( payload );
 
       var vector = ParseVector( body );

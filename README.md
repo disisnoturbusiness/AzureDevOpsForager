@@ -6,12 +6,14 @@
 
 Azure DevOps Forager indexes a codebase (Azure DevOps TFVC, Azure DevOps Git, or GitHub) into SQL Server 2025's
 native `VECTOR` type, then answers questions with a **hybrid retrieval pipeline** — dense vector search +
-two full-text signals fused with Reciprocal Rank Fusion, re-ranked by a `bge-reranker-v2-m3` cross-encoder,
+two full-text signals fused with Reciprocal Rank Fusion, re-ranked by a cross-encoder,
 and (optionally) explained by an LLM that only ever sees the snippets the server retrieved.
 
 Embedding and reranking each run **either in-process via local ONNX or remotely via a Hugging Face Inference
-Endpoint** — the same vectors and the same pipeline either way. Run it zero-local-ONNX against Hugging Face,
-fully offline on local models, or try the hosted demo.
+Endpoint** — the same pipeline either way. The hosted path runs code-specialized models (`bge-code-v1`
+embeddings + `Qwen3-Reranker-4B`, chosen for better C# retrieval); the local path runs lightweight ONNX
+models (`e5-large-v2` + `bge-reranker-v2-m3`) with zero GPU and zero API cost. Run it zero-local-ONNX
+against Hugging Face, fully offline on local models, or try the hosted demo.
 
 No data leaves your infrastructure except the question and the retrieved snippets, and the LLM API key
 lives **only on the server** — the desktop and web clients are thin clients that never hold a key.
@@ -20,19 +22,24 @@ lives **only on the server** — the desktop and web clients are thin clients th
 
 ## Why it's interesting
 
-- **SQL Server 2025 native vectors.** Embeddings are stored in a real `VECTOR(1024)` column with a
-  DiskANN vector index and queried with `VECTOR_SEARCH` — no separate vector database to run.
+- **SQL Server 2025 native vectors.** Embeddings are stored in a real `VECTOR(n)` column (sized by
+  `EmbeddingDimension`, default 1536) with a DiskANN vector index and queried with `VECTOR_SEARCH` — no
+  separate vector database to run.
 - **Hybrid retrieval with RRF.** A single stored procedure (`dbo.SearchCode`) fuses three ranked signals
   — dense vector similarity, chunk-level full-text, and file-level full-text — using Reciprocal Rank
   Fusion, so exact-name matches and semantic matches both surface.
-- **Cross-encoder reranking.** The RRF candidate pool is re-scored by `bge-reranker-v2-m3`, an
-  XLM-RoBERTa cross-encoder, for a precision boost over bi-encoder-only ranking. It runs either locally
-  via ONNX or against a Hugging Face endpoint, behind one `IReranker` interface, and is fail-soft — if
-  the reranker is unavailable the results simply fall back to their RRF order.
-- **Pluggable embeddings — local or hosted.** Queries and passages are embedded with `e5-large-v2`
-  (1024-dim, L2-normalized, `query:` / `passage:` prefixed) behind an `IEmbedder` interface. The same
-  vectors come from **local ONNX Runtime** (`EmbeddingService`, fully offline, no API cost) or a
-  **Hugging Face Inference Endpoint** (`HuggingFaceEmbedder`) — self-hosters choose per deployment.
+- **Cross-encoder reranking.** The RRF candidate pool is re-scored by a cross-encoder for a precision
+  boost over bi-encoder-only ranking. The hosted demo uses `Qwen3-Reranker-4B` (81.20 on MTEB-Code, where
+  the general-purpose `bge-reranker-v2-m3` scores 41.38), deployed as the sequence-classification
+  conversion `tomaarsen/Qwen3-Reranker-4B-seq-cls` on vLLM and called via a Jina-style `/rerank` API; the
+  local path runs `bge-reranker-v2-m3` via ONNX. Both sit behind one `IReranker` interface and are
+  fail-soft — if the reranker is unavailable the results simply fall back to their RRF order.
+- **Pluggable embeddings — local or hosted.** Embedding sits behind an `IEmbedder` interface with two
+  implementations: **local ONNX Runtime** (`EmbeddingService` — `e5-large-v2`, 1024-dim, fully offline,
+  no API cost) and a **Hugging Face Inference Endpoint** (`HuggingFaceEmbedder` — `BAAI/bge-code-v1`, a
+  code-specialized 1536-dim embedder with a 32k context, state-of-the-art on the CoIR code-retrieval
+  benchmark at ~81.8). Self-hosters choose per deployment; the vector dimension is config-driven
+  (`EmbeddingDimension`), and switching embedding models requires a full reindex.
 - **No ~1.3 GB model download when hosted.** Point at Hugging Face and the Server and Indexer load no
   local ONNX at all; a GPU-backed endpoint reindexes an estimated ~10–15× faster than local CPU ONNX
   (minutes → seconds, hardware-dependent), and scale-to-zero endpoints are handled with a warm-up retry.
@@ -53,17 +60,17 @@ lives **only on the server** — the desktop and web clients are thin clients th
                 ┌─────────────────────────────────┐         ┌──────────────────────────┐
    Web UI ─────▶│                                 │         │  SQL Server 2025         │
  (wwwroot)      │   Azure DevOps Forager Server   │────────▶│  CodeFiles / CodeChunks  │
-                │   (ASP.NET Core, :8000)         │  query  │  VECTOR(1024) + DiskANN  │
+                │   (ASP.NET Core, :8000)         │  query  │  VECTOR(1536) + DiskANN  │
  Desktop ──────▶│   /query /chat /systems         │         │  + full-text indexes     │
   chat          │   /health  + web UI             │         │  dbo.SearchCode (RRF)    │
                 │                                 │         └──────────────────────────┘
-                │   e5 embed → RRF →              │──▶ HF endpoint (embed + rerank), or local ONNX
-                │   bge rerank → Groq             │──▶ Groq API (key + HF token = server secrets)
+                │   embed → RRF →                 │──▶ HF endpoint (embed + rerank), or local ONNX
+                │   rerank → Groq                 │──▶ Groq API (key + HF token = server secrets)
                 └─────────────────────────────────┘
 
    Indexer (WinForms or headless)
      pick a source ─▶ TFVC / Azure DevOps Git / GitHub
-     Roslyn chunk + e5 embed (local ONNX or HF) ─▶ staging tables ─▶ atomic swap ─▶ live index
+     Roslyn chunk + embed (local ONNX or HF) ─▶ staging tables ─▶ atomic swap ─▶ live index
 ```
 
 ### Projects
@@ -80,14 +87,15 @@ lives **only on the server** — the desktop and web clients are thin clients th
 
 ## How search works
 
-1. **Embed the query** with `e5-large-v2` (prefixed `query:`), L2-normalized to a `VECTOR(1024)`.
+1. **Embed the query** — `bge-code-v1` (instruction-prompted) on the hosted path, or `e5-large-v2`
+   (prefixed `query:`) locally — L2-normalized to a `VECTOR(n)` sized by `EmbeddingDimension`.
 2. **`dbo.SearchCode`** runs three ranked signals in one round-trip:
    - dense `VECTOR_SEARCH` over `CodeChunks.Embedding` (top-N candidate pool),
    - `FREETEXT` over chunk content,
    - `FREETEXT` over file content,
    and fuses them with **Reciprocal Rank Fusion** (`weight × 1/(k + rank)` with k=60, default weights 60/30/30).
-3. **Over-fetch** the top RRF candidates and **rerank** them with the `bge-reranker-v2-m3` cross-encoder
-   (each `(query, chunk)` pair scored directly), then keep the top *N*.
+3. **Over-fetch** the top RRF candidates and **rerank** them with a cross-encoder (`Qwen3-Reranker-4B`
+   hosted, `bge-reranker-v2-m3` local; each `(query, chunk)` pair scored directly), then keep the top *N*.
 4. If embeddings are unavailable, the pipeline **degrades gracefully** to full-text-only search.
 
 For chat, the server runs that retrieval, builds a context block from the top hits, and asks the LLM to
@@ -130,7 +138,9 @@ connect).
 cp config.sample.json config.json     # then edit
 ```
 Set at least `SqlConnectionString` and `AzdoVectorConnectionString` (usually the same value), then either
-`OnnxModelPath` (local) or `HuggingFaceEmbedUrl` + `HuggingFaceRerankUrl` (hosted). `config.json` is
+`OnnxModelPath` (local) or `HuggingFaceEmbedUrl` + `HuggingFaceRerankUrl` (hosted). Set `EmbeddingDimension`
+to match the embedding model — 1024 for the local `e5-large-v2`, 1536 (the default) for the hosted
+`bge-code-v1`. `config.json` is
 gitignored — it can hold a connection string and the non-secret HF URLs. The `HF_TOKEN` and Groq key are
 **not** config keys (see the run step below).
 
@@ -161,11 +171,26 @@ Open `http://localhost:8000` for the web UI, or launch the desktop viewer
 
 ## Embedding & reranking
 
-Azure DevOps Forager uses two models — `e5-large-v2` for embeddings and `bge-reranker-v2-m3` for
-cross-encoder reranking — and each can run **either locally via ONNX or remotely via a Hugging Face
-Inference Endpoint**, behind the `IEmbedder` and `IReranker` interfaces. The output is identical: 1024-dim,
-L2-normalized, `query:` / `passage:`-prefixed vectors, and the same ranking pipeline, no matter which
-backend is wired in.
+Embedding and reranking each run **either locally via ONNX or remotely via a Hugging Face Inference
+Endpoint**, behind the `IEmbedder` and `IReranker` interfaces — and the two paths run different models:
+
+- **Hosted (how the demo runs)** — `BAAI/bge-code-v1` embeddings (code-specialized, Qwen2.5-Coder-1.5B
+  backbone, 1536-dim, 32k context, Apache 2.0; state-of-the-art on the CoIR code-retrieval benchmark at
+  ~81.8), served on a Hugging Face Inference Endpoint via TEI, plus `Qwen3-Reranker-4B` (Apache 2.0;
+  81.20 on MTEB-Code, vs 41.38 for `bge-reranker-v2-m3`), deployed as the sequence-classification
+  conversion `tomaarsen/Qwen3-Reranker-4B-seq-cls` on a vLLM container and called via the Jina-style
+  `/rerank` API. Both were chosen because they are code-specialized — a measurable retrieval-quality
+  upgrade for C# over the earlier general-text models.
+- **Local (lightweight, offline)** — `e5-large-v2` embeddings (1024-dim) + the `bge-reranker-v2-m3`
+  cross-encoder, both in-process via ONNX Runtime. Fully offline, no GPU, no account, no API cost.
+
+The vector dimension is config-driven: `EmbeddingDimension` (default 1536) sizes the `VECTOR(n)` column,
+the DiskANN index, and the `dbo.SearchCode` proc — set it to 1024 when using the local e5 model. Because
+the two embedders produce different vectors, **changing embedding models requires a full reindex** (the
+staging + atomic-swap reindex handles this with zero downtime). Query prompting also differs per model:
+`bge-code-v1` queries are sent as `<instruct>{task}\n<query>{text}` (task text from
+`EmbeddingQueryInstruction`) and documents are embedded raw; the local e5 keeps its `query: ` /
+`passage: ` prefixes.
 
 **Which backend runs** is decided at startup, and the preference order differs between the two hosts —
 the Server prefers **Hugging Face → local ONNX → full-text**, while the Indexer prefers **local ONNX →
@@ -185,7 +210,8 @@ Hugging Face → hosted `/embed` → disabled**:
 The reranker is optional either way — set `RerankerEnabled` to `false` to run vector + RRF only — and it is
 fail-soft: if a HF rerank call fails, results fall back to their RRF order.
 
-**Local models** (not committed — they're large):
+**Local lightweight models** (not committed — they're large; these are the local pair, not the hosted
+demo's models):
 
 | Model | Purpose | Files (under `models/`) |
 |-------|---------|-------------------------|
@@ -194,7 +220,8 @@ fail-soft: if a HF rerank call fails, results fall back to their RRF order.
 
 `./models/download-models.ps1` exports both models from the official Hugging Face weights via
 Python/optimum (requires Python 3.9+; downloads ~2.5 GB of weights on first run). Both are permissively
-licensed (MIT) and redistributable.
+licensed (MIT) and redistributable. Set `EmbeddingDimension` to 1024 in `config.json` when running these
+local models.
 
 **Hugging Face** needs only the two endpoint URLs in `config.json` (`HuggingFaceEmbedUrl`,
 `HuggingFaceRerankUrl` — not secret) plus an `HF_TOKEN` supplied as an environment variable or stored
@@ -214,9 +241,12 @@ working default; you override only what you need.
 | `SqlConnectionString` | Target SQL Server / Azure SQL database |
 | `AzdoVectorConnectionString` | SQL DB the Indexer writes the vector index into — usually the same as `SqlConnectionString` |
 | `OnnxModelPath` | Path to local `e5-large-v2.onnx` (used when Hugging Face is not configured) |
+| `EmbeddingDimension` | Vector dimension for the `VECTOR(n)` column, DiskANN index, and `dbo.SearchCode` — 1536 default (hosted `bge-code-v1`); **1024 required for the local e5 model**. Changing it means a full reindex |
+| `EmbeddingQueryInstruction` | Task instruction for `bge-code-v1` query prompts (`<instruct>{task}\n<query>{text}`); hosted embed path only |
 | `HuggingFaceEmbedUrl` / `HuggingFaceRerankUrl` | Hugging Face Inference Endpoint URLs for embedding + reranking (not secret; leave blank to use local ONNX) |
 | `EmbeddingServiceUrl` | Hosted Server `/embed` service the Indexer uses to embed remotely when no local model and no HF endpoint is configured (default: the demo server) |
 | `RerankerModelPath` / `RerankerEnabled` / `RerankerInputSize` | Local cross-encoder model path, on/off, candidate-pool size |
+| `RerankerInstruction` / `RerankerModelName` | Hosted (Qwen3) rerank only: task instruction baked into each scoring prompt, and the model name sent to the `/rerank` endpoint (default `tomaarsen/Qwen3-Reranker-4B-seq-cls`) |
 | `RrfVectorWeight` / `RrfChunkFtsWeight` / `RrfFileFtsWeight` | RRF fusion weights |
 | `MinFtsRank` / `MaxVectorDistance` | Candidate-admission thresholds |
 | `SourceType` | `tfvc`, `git`, or `github` |
@@ -234,9 +264,9 @@ a shipped artifact or sent to a client.
 ## Tech stack
 
 .NET 8 / .NET Standard 2.0 / .NET Framework 4.8 · ASP.NET Core · WinForms · SQL Server 2025
-(`VECTOR`, `VECTOR_SEARCH`, DiskANN, Full-Text Search) · embeddings + reranking (`e5-large-v2`,
-`bge-reranker-v2-m3`) via ONNX Runtime **or** Hugging Face Inference Endpoints · Roslyn · Groq
-(llama-3.3-70b).
+(`VECTOR`, `VECTOR_SEARCH`, DiskANN, Full-Text Search) · embeddings + reranking (`bge-code-v1` +
+`Qwen3-Reranker-4B` via Hugging Face Inference Endpoints, **or** `e5-large-v2` + `bge-reranker-v2-m3`
+via local ONNX Runtime) · Roslyn · Groq (llama-3.3-70b).
 
 ## Documentation
 

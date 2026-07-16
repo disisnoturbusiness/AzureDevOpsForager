@@ -18,7 +18,10 @@ namespace AzureDevOpsForager.Core.Services.Embedding;
 ///
 /// The heavy lifting is done locally by an ONNX model (E5-large-v2) via ONNX Runtime. Running the
 /// model in-process is a deliberate design choice: it means no Python dependency, no external API,
-/// and no per-call cost, which keeps the give-away trivial for a self-hoster to stand up.
+/// and no per-call cost, which keeps the give-away trivial for a self-hoster to stand up. This is
+/// the lightweight LOCAL option; the hosted demo embeds with the code-specialized bge-code-v1
+/// (1536-dim) via a Hugging Face endpoint instead. Running this local model requires setting
+/// Config.EmbeddingDimension to 1024 to match its output (the shipped default is 1536).
 ///
 /// E5-large-v2 has a few contracts that differ from the older all-mpnet-base-v2 model and that the
 /// rest of this class encodes:

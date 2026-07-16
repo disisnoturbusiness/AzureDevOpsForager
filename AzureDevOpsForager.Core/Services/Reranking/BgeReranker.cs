@@ -10,9 +10,11 @@ using Microsoft.ML.Tokenizers;
 
 namespace AzureDevOpsForager.Core.Services.Reranking;
 /// <summary>
-/// Cross-encoder reranker backed by BAAI/bge-reranker-v2-m3 (an XLM-RoBERTa-large model). It loads
-/// an ONNX export of the model together with the SentencePiece BPE vocabulary from the folder that
-/// contains <see cref="Config.RerankerModelPath"/>.
+/// Cross-encoder reranker backed by BAAI/bge-reranker-v2-m3 (an XLM-RoBERTa-large model) — the
+/// lightweight LOCAL reranking option; the hosted demo reranks with the code-specialized
+/// Qwen3-Reranker-4B via <see cref="HuggingFaceReranker"/> instead. It loads an ONNX export of the
+/// model together with the SentencePiece BPE vocabulary from the folder that contains
+/// <see cref="Config.RerankerModelPath"/>.
 ///
 /// For each (query, chunk) pair the reranker tokenizes both sides with SentencePiece, applies the
 /// fairseq +1 token-id offset, and assembles the XLM-R pair sequence (&lt;s&gt; q &lt;/s&gt;&lt;/s&gt;

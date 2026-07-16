@@ -30,7 +30,7 @@ Azure DevOps Forager is a **hybrid code search engine** with a **grounded AI cha
 
 You don't manage any of the machinery — the embeddings, the vector index, the keyword ranking, and the optional AI answer all happen behind the server. The short version of *why the results are good*: the semantic and keyword rankings are fused, so a strong exact-name match and a strong "does-what-you-described" match can both rise to the top; and in **Ask** mode a grounded LLM explains the top hits using *only* the retrieved code, citing its sources.
 
-> Curious about the internals — SQL Server 2025 native vectors, the RRF fusion, the `bge-reranker-v2-m3` cross-encoder reranker, the `e5-large-v2` embedding model? That's all covered in [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). You don't need any of it to use the app. (Both the embedding and reranking models can run either locally or on a remote Hugging Face endpoint — that choice is explained in [Where Embedding Happens — Your Three Options](#4-optional-where-embedding-happens--your-three-options) below.)
+> Curious about the internals — SQL Server 2025 native vectors, the RRF fusion, the cross-encoder reranker, the embedding models? That's all covered in [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md). You don't need any of it to use the app. (Embedding and reranking can run either locally on lightweight ONNX models or on remote Hugging Face endpoints running code-specialized models — the hosted demo does the latter. That choice is explained in [Where Embedding Happens — Your Three Options](#4-optional-where-embedding-happens--your-three-options) below.)
 
 **Privacy model, in one line:** your code stays on your infrastructure. Only your question and the snippets the server retrieved are ever sent to the LLM — and any secret keys (the LLM API key, and a Hugging Face token if you use hosted models) live **only on the server**, never in the desktop or web client.
 
@@ -59,7 +59,7 @@ Self-hosting means you run the server yourself, pointed at **your own SQL Server
 
 The one prerequisite that matters most: the destination must be a **SQL Server 2025** instance (or Azure SQL) with vector support, because the native `VECTOR` type is what makes semantic search work. Full-Text Search must also be available for the lexical half. (The AI chat additionally needs a Groq API key set on the server — but plain search works fine without it.)
 
-For the embedding and reranking models, self-hosters have a choice — you can run them **locally** (download the ONNX model bundles, fully offline, no account) or point the server and Indexer at **Hugging Face hosted endpoints** (no ~1.3 GB local download; a GPU-backed endpoint reindexes an estimated ~10–15× faster than local CPU ONNX — minutes become seconds, though exact speed depends on your hardware and endpoint). Both are laid out in [Where Embedding Happens — Your Three Options](#4-optional-where-embedding-happens--your-three-options) below.
+For the embedding and reranking models, self-hosters have a choice — you can run **lightweight models locally** (download the ONNX model bundles, fully offline, no account) or point the server and Indexer at **Hugging Face hosted endpoints running code-specialized models** (no ~1.3 GB local download; a GPU-backed endpoint reindexes an estimated ~10–15× faster than local CPU ONNX — minutes become seconds, though exact speed depends on your hardware and endpoint). Both are laid out in [Where Embedding Happens — Your Three Options](#4-optional-where-embedding-happens--your-three-options) below.
 
 The nice part: when you finish a build, the Indexer offers to **wire your local server to that database for you**, so you don't have to hand-edit any config to start searching what you just indexed.
 
@@ -247,10 +247,12 @@ Leave the **Model Override Path** blank and don't configure any HF endpoints, an
 
 #### Option 2 — Hugging Face hosted endpoints (no local download)
 
-Instead of downloading ~1.3 GB of models, you can point the app at **Hugging Face Inference Endpoints** that run the same two models for you remotely:
+Instead of downloading ~1.3 GB of models, you can point the app at **Hugging Face Inference Endpoints** that run **code-specialized models** remotely — this is exactly how the hosted demo runs:
 
-- **Embedding** — `e5-large-v2`, served by an HF endpoint (produces the identical 1024-dimension, L2-normalized, `query: `/`passage: `-prefixed vectors you'd get locally).
-- **Reranking** — `bge-reranker-v2-m3`, served by an HF endpoint.
+- **Embedding** — `BAAI/bge-code-v1`, a code-specialized 1536-dimension embedding model. Keep `EmbeddingDimension` at its default of `1536` in `config.json` for this model.
+- **Reranking** — `Qwen3-Reranker-4B`, served via the endpoint's `/rerank` API.
+
+These are different models than the local ONNX pair (Option 3), so their vectors are not interchangeable — an index built with one embedding model must be fully rebuilt to search with the other.
 
 You configure this once, in the server/Indexer **`config.json`** (these URLs are **not** secret, so they live in plain config):
 
@@ -269,6 +271,8 @@ HF is used **only when both** an embedding URL *and* a token are present. When i
 #### Option 3 — Run the models locally (offline, no account, uncapped)
 
 Point the **Model Override Path** at a local model and this machine embeds **locally** — no file-count cap, no account, and nothing leaves your network for a hosted service. This is the offline / no-account option, and it works fully.
+
+The local models are the lightweight pair — `e5-large-v2` embeddings (1024-dimension) plus the `bge-reranker-v2-m3` reranker — so set `EmbeddingDimension` to `1024` in `config.json` (the default `1536` matches the hosted `bge-code-v1`). Switching between the local and hosted embedding models requires rebuilding the index.
 
 The easiest way to get the local model is the **Download** link next to the field. Click it and the Indexer will, with **no Python and no manual steps**:
 

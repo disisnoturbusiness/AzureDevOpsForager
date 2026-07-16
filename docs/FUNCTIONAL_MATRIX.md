@@ -23,7 +23,7 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 | Capability | Implementation | Verified by |
 |------------|----------------|-------------|
 | Hybrid RRF search (vector + chunk-FTS + file-FTS fused) | `dbo.SearchCode` proc · `Core/Services/Search/HybridSearchService.cs` | Demo |
-| Dense vector search (`VECTOR_SEARCH` + DiskANN, `VECTOR(1024)`) | `Core/Services/Storage/SchemaInitializer.cs` | Demo |
+| Dense vector search (`VECTOR_SEARCH` + DiskANN, `VECTOR(n)` sized by `EmbeddingDimension`, default 1536) | `Core/Services/Storage/SchemaInitializer.cs` | Demo |
 | Full-text search (chunk-level + file-level `FREETEXT`) | `Core/Services/Search/SqlFtsService.cs` | Demo |
 | Graceful fallback to full-text-only when embeddings unavailable | `HybridSearchService.BuildFtsOnlyResponse` | Demo |
 | Filename search (`POST /search_by_filename`) | `HybridSearchService.SearchByFilename` | Demo |
@@ -32,7 +32,8 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 
 | Capability | Implementation | Verified by |
 |------------|----------------|-------------|
-| Cross-encoder rerank — `bge-reranker-v2-m3` (query,chunk) scoring | `Core/Services/Reranking/BgeReranker.cs` | Demo |
+| Hosted cross-encoder rerank — `Qwen3-Reranker-4B` (seq-cls, vLLM `/rerank`, Qwen3 chat-template wrapping client-side) | `Core/Services/Reranking/HuggingFaceReranker.cs` | Demo *(the hosted demo is HF-backed)* |
+| Local ONNX cross-encoder rerank — `bge-reranker-v2-m3` (query,chunk) scoring | `Core/Services/Reranking/BgeReranker.cs` | Manual |
 | Fail-soft: fall back to RRF order if reranker errors/unavailable | `HybridSearchService.ApplyRerankAsync` | Demo |
 | Toggle reranking on/off (`RerankerEnabled`) | `Core/Config.cs` | **Unit** — `ConfigTests` |
 
@@ -40,8 +41,8 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 
 | Capability | Implementation | Verified by |
 |------------|----------------|-------------|
-| Local ONNX embeddings — `e5-large-v2`, 1024-dim, L2-normalized, `query:`/`passage:` prefixed | `Core/Services/Embedding/EmbeddingService.cs` | Demo |
-| Hugging Face endpoint embeddings (scale-to-zero warm-up retry) | `Core/Services/Embedding/HuggingFaceEmbedder.cs` | Demo *(the hosted demo is HF-backed)* |
+| Local ONNX embeddings — `e5-large-v2`, 1024-dim (requires `EmbeddingDimension=1024`), L2-normalized, `query:`/`passage:` prefixed | `Core/Services/Embedding/EmbeddingService.cs` | Manual |
+| Hugging Face endpoint embeddings — `bge-code-v1`, 1536-dim, `<instruct>`/`<query>` query prompt, raw documents (scale-to-zero warm-up retry) | `Core/Services/Embedding/HuggingFaceEmbedder.cs` | Demo *(the hosted demo is HF-backed)* |
 | Hosted `/embed` fallback for the Indexer (capped by `HostedEmbeddingFileCap`) | `Core/Services/Search/HybridSearchService.cs` | Demo |
 | Batch embedding (`EmbedQueryBatch` / `EmbedPassageBatch`) | `Core/Services/Embedding/IEmbedder.cs` | Demo |
 
@@ -82,6 +83,8 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 | RRF fusion weights (`RrfVectorWeight` 60 / `RrfChunkFtsWeight` 30 / `RrfFileFtsWeight` 30, k=60) | `Core/Config.cs` | **Unit** — `ConfigTests` (parse) · Demo (effect) |
 | Candidate thresholds (`MaxVectorDistance` 0.5, `MinFtsRank` 10) | `Core/Config.cs` | **Unit** — `ConfigTests` |
 | Reranker pool size (`RerankerInputSize` 30) | `Core/Config.cs` | **Unit** — `ConfigTests` |
+| Dimension-driven vector schema (`EmbeddingDimension` 1536 default; 1024 for local e5) flows into `VECTOR(n)`, DiskANN, `dbo.SearchCode` | `Core/Config.cs` · `Core/Services/Storage/SchemaInitializer.cs` | Demo (runs 1536) |
+| Hosted model prompts/name (`EmbeddingQueryInstruction`, `RerankerInstruction`, `RerankerModelName`) | `Core/Config.cs` | Demo (hosted paths use them) |
 | Response caps (`MaxContentLength` 1500, `HostedEmbeddingFileCap` 1000) | `Core/Config.cs` | Manual |
 
 ## Security

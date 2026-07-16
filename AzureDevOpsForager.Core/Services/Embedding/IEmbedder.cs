@@ -3,11 +3,13 @@ using System.Threading.Tasks;
 
 namespace AzureDevOpsForager.Core.Services.Embedding;
 /// <summary>
-/// Abstraction over "turn text into a 1024-dim vector" so the query + passage embedding path can be
-/// satisfied either in-process by the local ONNX <see cref="EmbeddingService"/> or remotely by
-/// <see cref="HuggingFaceEmbedder"/>. Both implementations apply the E5 "query: " / "passage: "
-/// prefixes and return unit-length vectors, so their outputs are interchangeable and the cosine-based
-/// ranking stays valid no matter which one is wired in.
+/// Abstraction over "turn text into an embedding vector" (sized by Config.EmbeddingDimension) so the
+/// query + passage embedding path can be satisfied either in-process by the local ONNX
+/// <see cref="EmbeddingService"/> (e5-large-v2, 1024-dim, "query: "/"passage: " prefixes) or remotely by
+/// <see cref="HuggingFaceEmbedder"/> (bge-code-v1, 1536-dim, instruction-formatted queries). Each
+/// implementation applies its own model's prompt format and returns unit-length vectors, so cosine-based
+/// ranking stays valid no matter which one is wired in — but the two models' vectors are NOT
+/// interchangeable with each other: an index must be built and queried by the same model.
 ///
 /// Both a synchronous and an asynchronous form of each operation are exposed. Server request handlers
 /// (an inherently async, thread-pool-bound context) should prefer the *Async members so a remote HF
@@ -17,10 +19,10 @@ namespace AzureDevOpsForager.Core.Services.Embedding;
 /// </summary>
 public interface IEmbedder
 {
-   /// <summary>Embeds a search query (adds the E5 "query: " prefix). Returns a unit-length 1024-dim vector.</summary>
+   /// <summary>Embeds a search query (applying the model's query prompt format). Returns a unit-length vector.</summary>
    float[] EmbedQuery( string text );
 
-   /// <summary>Embeds a passage / code chunk (adds the E5 "passage: " prefix). Returns a unit-length 1024-dim vector.</summary>
+   /// <summary>Embeds a passage / code chunk (applying the model's passage format). Returns a unit-length vector.</summary>
    float[] EmbedPassage( string text );
 
    /// <summary>Embeds many queries; equivalent to calling <see cref="EmbedQuery"/> per item.</summary>

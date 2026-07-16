@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Fetches the two ONNX models Azure DevOps Forager needs and places them where config.json expects.
+  Fetches the two lightweight LOCAL ONNX models and places them where config.json expects.
 
 .DESCRIPTION
   Exports official HuggingFace weights to ONNX with Optimum (reproducible; no dependency on
@@ -10,6 +10,11 @@
     BAAI/bge-reranker-v2-m3  -> models/bge-reranker-v2-m3-onnx/model.onnx (+ sentencepiece.bpe.model)  [reranker]
 
   Both models are MIT-licensed and redistributable.
+
+  These are the lightweight LOCAL models (in-process ONNX, no GPU, no API). The hosted demo instead
+  runs code-specialized models — BAAI/bge-code-v1 embeddings + Qwen3-Reranker-4B — via Hugging Face
+  Inference Endpoints; see the README. When using these local models, set EmbeddingDimension = 1024
+  in config.json (the 1536 default matches the hosted bge-code-v1).
 
 .PREREQUISITES
   Python 3.9+ and pip on PATH. The script installs 'optimum[exporters]', onnx, and onnxruntime
@@ -42,6 +47,7 @@ Write-Host "Done. Expected files:"
 Write-Host "  $e5\e5-large-v2.onnx        (+ vocab.txt)"
 Write-Host "  $bge\model.onnx             (+ sentencepiece.bpe.model)"
 Write-Host ""
-Write-Host "config.json defaults already point here:"
-Write-Host "  OnnxModelPath     = models/e5-large-v2/e5-large-v2.onnx"
-Write-Host "  RerankerModelPath = models/bge-reranker-v2-m3-onnx/model.onnx"
+Write-Host "config.json settings for these local models:"
+Write-Host "  OnnxModelPath      = models/e5-large-v2/e5-large-v2.onnx"
+Write-Host "  RerankerModelPath  = models/bge-reranker-v2-m3-onnx/model.onnx"
+Write-Host "  EmbeddingDimension = 1024   (required for e5-large-v2; the 1536 default matches the hosted bge-code-v1)"

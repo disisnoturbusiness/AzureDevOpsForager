@@ -2,8 +2,10 @@
 -- Code-search vector index schema  (SQL Server 2025 on-prem / Azure SQL Database)
 --
 -- One row per source file (dbo.CodeFiles) + one row per semantic code chunk (dbo.CodeChunks).
--- Chunk embeddings are e5-large-v2 (1024-dim), stored in a native VECTOR column and served by a
--- DiskANN vector index; the text columns feed full-text search for the keyword half of hybrid search.
+-- Chunk embeddings are bge-code-v1 (1536-dim, the hosted default), stored in a native VECTOR column and
+-- served by a DiskANN vector index; the text columns feed full-text search for the keyword half of hybrid
+-- search. The VECTOR(n) size MUST match the embedding model / Config.EmbeddingDimension: 1536 for
+-- bge-code-v1, 1024 if you self-host with the lightweight local e5-large-v2 ONNX model.
 --
 -- RUN ORDER:
 --   1) Run THIS script  → creates both tables + full-text indexes + b-tree indexes.
@@ -77,7 +79,7 @@ CREATE TABLE dbo.CodeFiles
 GO
 
 -- =============================================================================
--- TABLE 2: CodeChunks  (method/class chunks; e5-large-v2 => 1024-dim)
+-- TABLE 2: CodeChunks  (method/class chunks; bge-code-v1 => 1536-dim, local e5 => 1024)
 -- =============================================================================
 CREATE TABLE dbo.CodeChunks
 (
@@ -89,7 +91,7 @@ CREATE TABLE dbo.CodeChunks
    StartLine             INT               NOT NULL,
    EndLine               INT               NOT NULL,
    ChunkContent          NVARCHAR(MAX)     NOT NULL,
-   Embedding             VECTOR(1024)      NULL,       -- nullable: rows can exist pre-embedding
+   Embedding             VECTOR(1536)      NULL,       -- nullable: rows can exist pre-embedding; size must match Config.EmbeddingDimension
    Namespace             NVARCHAR(500)     NULL,
    ClassName             NVARCHAR(200)     NULL,
    Signature             NVARCHAR(MAX)     NULL,

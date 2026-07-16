@@ -24,9 +24,11 @@ public static class Config
    public static string DataRoot { get; set; } = @"C:\AzureDevOpsForager";
 
    /// <summary>
-   /// Filesystem path to the sentence-embedding ONNX model (E5-large-v2, 1024-dimensional output). This is the
-   /// model the Indexer and Server load to turn code chunks and queries into vectors; when it is present a
-   /// self-hoster embeds locally instead of calling the hosted service.
+   /// Filesystem path to the sentence-embedding ONNX model (E5-large-v2, 1024-dimensional output — the
+   /// lightweight local option; the hosted demo embeds with the code-specialized bge-code-v1 instead).
+   /// This is the model the Indexer and Server load to turn code chunks and queries into vectors; when it
+   /// is present a self-hoster embeds locally instead of calling the hosted service. Running this local
+   /// model requires setting <see cref="EmbeddingDimension"/> to 1024 to match its output.
    /// </summary>
    public static string OnnxModelPath { get; set; } = @"\models\e5-large-v2\e5-large-v2.onnx";
 
@@ -109,21 +111,46 @@ public static class Config
    public static string EmbeddingServiceUrl { get; set; } = "https://azuredevopsforager.azurewebsites.net";
 
    /// <summary>
-   /// Hugging Face Inference Endpoint URL for embeddings (e5-large-v2). When set together with a token, the
-   /// Server and Indexer embed via HTTP to this endpoint instead of loading the local ONNX model. Blank =
-   /// disabled. Not a secret (the token protects it); set per-deployment via config.json or the
-   /// HUGGINGFACE_EMBED_URL environment variable (config.json wins when both are present).
+   /// Hugging Face Inference Endpoint URL for embeddings (BAAI/bge-code-v1, a code-specialized 1536-dim
+   /// embedder served by TEI). When set together with a token, the Server and Indexer embed via HTTP to
+   /// this endpoint instead of loading the local ONNX model. Blank = disabled. Not a secret (the token
+   /// protects it); set per-deployment via config.json or the HUGGINGFACE_EMBED_URL environment variable
+   /// (config.json wins when both are present).
    /// </summary>
    public static string HuggingFaceEmbedUrl { get; set; } =
       System.Environment.GetEnvironmentVariable( "HUGGINGFACE_EMBED_URL" ) ?? "";
 
    /// <summary>
-   /// Hugging Face Inference Endpoint URL for reranking (bge-reranker-v2-m3). The client appends the
-   /// "/rerank" route. When set with a token, ranking runs remotely instead of via the local ONNX reranker.
-   /// Also settable via the HUGGINGFACE_RERANK_URL environment variable (config.json wins when both are set).
+   /// Hugging Face Inference Endpoint URL for reranking (Qwen3-Reranker-4B in its sequence-classification
+   /// form, served by vLLM). The client appends the "/rerank" route (Jina-compatible API). When set with a
+   /// token, ranking runs remotely instead of via the local ONNX reranker. Also settable via the
+   /// HUGGINGFACE_RERANK_URL environment variable (config.json wins when both are set).
    /// </summary>
    public static string HuggingFaceRerankUrl { get; set; } =
       System.Environment.GetEnvironmentVariable( "HUGGINGFACE_RERANK_URL" ) ?? "";
+
+   /// <summary>
+   /// Instruction sent on the query side of a bge-code-v1 embedding request, using the model's
+   /// "&lt;instruct&gt;{task}\n&lt;query&gt;{text}" prompt format. Documents/passages are embedded raw (no
+   /// instruction), per the model card. Only the hosted (Hugging Face) embed path uses this; the local E5
+   /// model keeps its own "query: " / "passage: " prefixes.
+   /// </summary>
+   public static string EmbeddingQueryInstruction { get; set; } =
+      "Given a code search query, retrieve relevant code that answers the query.";
+
+   /// <summary>
+   /// Task instruction baked into every Qwen3-Reranker scoring prompt (the model card warns that scoring
+   /// without an instruction costs 1-5% accuracy, so a code-search-specific one is supplied by default).
+   /// Only the hosted (Hugging Face) rerank path uses this; the local bge reranker takes no instruction.
+   /// </summary>
+   public static string RerankerInstruction { get; set; } =
+      "Given a code search query, retrieve relevant code chunks that answer the query.";
+
+   /// <summary>
+   /// Model name sent in the hosted rerank request body. vLLM's OpenAI-compatible /rerank route expects
+   /// the served model's name; this default matches the deployed sequence-classification conversion.
+   /// </summary>
+   public static string RerankerModelName { get; set; } = "tomaarsen/Qwen3-Reranker-4B-seq-cls";
 
    /// <summary>
    /// The Hugging Face API token, resolved from the HF_TOKEN environment variable or the encrypted
@@ -208,9 +235,12 @@ public static class Config
       AzureDevOpsForager.Core.Services.Utilities.SecretStore.Get( "AZDO_VECTOR_CONNECTION_STRING" ) ?? "";
 
    /// <summary>
-   /// Dimensionality of the embedding vectors stored in the index; must match the model in use (E5-large-v2 = 1024).
+   /// Dimensionality of the embedding vectors stored in the index; must match the embedding model in use
+   /// (bge-code-v1 = 1536, the hosted default; the lightweight local E5-large-v2 = 1024). This value flows
+   /// into the VECTOR(n) column DDL, the DiskANN index, and the SearchCode procedure's parameter, so
+   /// changing the embedding model means changing this AND running a full reindex.
    /// </summary>
-   public static int EmbeddingDimension { get; set; } = 1024;
+   public static int EmbeddingDimension { get; set; } = 1536;
 
    /// <summary>
    /// Azure DevOps organization URL, e.g. https://dev.azure.com/your-org. Seeded from the environment via
@@ -379,6 +409,10 @@ public static class Config
          OnnxModelPath = modelPath;
       if( config.TryGetValue( "ModelDownloadUrl", out var modelDownloadUrl ) )
          ModelDownloadUrl = modelDownloadUrl;
+      if( config.TryGetValue( "EmbeddingDimension", out var embeddingDimensionText ) && int.TryParse( embeddingDimensionText, out var embeddingDimension ) )
+         EmbeddingDimension = embeddingDimension;
+      if( config.TryGetValue( "EmbeddingQueryInstruction", out var embeddingQueryInstruction ) && !string.IsNullOrWhiteSpace( embeddingQueryInstruction ) )
+         EmbeddingQueryInstruction = embeddingQueryInstruction;
       if( config.TryGetValue( "HostedEmbeddingFileCap", out var fileCapText ) && int.TryParse( fileCapText, out var fileCap ) )
          HostedEmbeddingFileCap = fileCap;
    }
@@ -458,6 +492,10 @@ public static class Config
    {
       if( config.TryGetValue( "RerankerModelPath", out var rerankerModelPath ) )
          RerankerModelPath = rerankerModelPath;
+      if( config.TryGetValue( "RerankerInstruction", out var rerankerInstruction ) && !string.IsNullOrWhiteSpace( rerankerInstruction ) )
+         RerankerInstruction = rerankerInstruction;
+      if( config.TryGetValue( "RerankerModelName", out var rerankerModelName ) && !string.IsNullOrWhiteSpace( rerankerModelName ) )
+         RerankerModelName = rerankerModelName;
       if( config.TryGetValue( "RerankerEnabled", out var rerankerEnabledText ) && bool.TryParse( rerankerEnabledText, out var rerankerEnabled ) )
          RerankerEnabled = rerankerEnabled;
       if( config.TryGetValue( "RerankerInputSize", out var rerankerInputSizeText ) && int.TryParse( rerankerInputSizeText, out var rerankerInputSize ) )

@@ -225,7 +225,7 @@ public class HybridSearchService : IDisposable
       {
          await connection.OpenAsync();
          using var command = new SqlCommand(
-            "DECLARE @qv VECTOR(1024) = CAST(@json AS VECTOR(1024)); " +
+            $"DECLARE @qv VECTOR({Config.EmbeddingDimension}) = CAST(@json AS VECTOR({Config.EmbeddingDimension})); " +
             "EXEC dbo.SearchCode @SearchText=@txt, @QueryVector=@qv, @TopN=@topN, " +
             "@VectorWeight=@vw, @ChunkFtsWeight=@cw, @FileFtsWeight=@fw, @MinFtsRank=@minRank, @MaxDistance=@maxDist;", connection );
          command.Parameters.AddWithValue( "@json", json );
