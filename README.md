@@ -223,6 +223,15 @@ Python/optimum (requires Python 3.9+; downloads ~2.5 GB of weights on first run)
 licensed (MIT) and redistributable. Set `EmbeddingDimension` to 1024 in `config.json` when running these
 local models.
 
+**Running the hosted `bge-code-v1` embedder locally.** The hosted demo's code-specialized embedder has
+no official ONNX build, so I quantized and published one:
+[**disisnoturbusiness/bge-code-v1-onnx**](https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx)
+(4-bit block-wise, ~1.75 GB, Apache 2.0). It passed a retrieval-parity gate before publishing — same
+top-1 document as the fp32 model on every test query, mean cosine 0.95 (numbers in the repo's
+`validation_report.json`). Point `OnnxModelPath` at it and set `EmbeddingDimension` to 1536 to run the
+code embedder fully offline. Note it is a 1.5B model: CPU embedding is around a second per query, so a
+GPU-backed HF endpoint is still the better choice for bulk reindexing.
+
 **Hugging Face** needs only the two endpoint URLs in `config.json` (`HuggingFaceEmbedUrl`,
 `HuggingFaceRerankUrl` — not secret) plus an `HF_TOKEN` supplied as an environment variable or stored
 encrypted via `Server --set-secret HF_TOKEN hf_xxx`.
