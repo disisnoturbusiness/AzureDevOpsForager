@@ -669,7 +669,14 @@ body::after {
   max-width: 640px;
   margin: 0 auto 0.6rem;
 }
-.foot-links { margin: 0.55rem 0 0; }
+.foot-built {
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  color: var(--txt-2);
+  margin: 0.9rem 0 0;
+}
+.foot-built strong { color: var(--txt-1); font-weight: 600; }
+.foot-links { margin: 0.55rem 0 0; line-height: 1.9; }
 .foot-links a { color: var(--txt-2); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
 .foot-links a:hover { color: var(--acc); }
 
