@@ -299,15 +299,34 @@ public class HybridSearchService : IDisposable
          return rows;
 
       var ordered = new List<(string, string, Dictionary<string, string>)>();
+      var dropped = 0;
       foreach( var rerankResult in reranked )
          if( rerankResult.OriginalIndex >= 0 && rerankResult.OriginalIndex < rows.Count )
          {
             var row = rows[rerankResult.OriginalIndex];
             row.Meta["rerank_score"] = rerankResult.Score.ToString( "0.#####" );
+
+            // Relevance gate. Retrieval always returns its nearest NResults candidates, so without this
+            // a question the corpus cannot answer still comes back with a full page of confident-looking
+            // results. The cross-encoder is the only signal that separates the two cleanly — vector
+            // distance does not, since off-topic and on-topic hits occupy the same distance band — so
+            // the floor is applied here rather than earlier in the pipeline.
+            if( rerankResult.Score < Config.MinRerankScore )
+            {
+               dropped++;
+               continue;
+            }
+
             ordered.Add( row );
          }
 
-      return ordered.Count > 0 ? ordered : rows;
+      if( dropped > 0 )
+         Logger.Info( $"Dropped {dropped} result(s) below MinRerankScore={Config.MinRerankScore} for \"{question}\"; {ordered.Count} kept.", "Search" );
+
+      // Deliberately NOT falling back to the unfiltered rows when everything is filtered out: an empty
+      // result set is the correct, informative answer to a question this corpus cannot answer. The
+      // fallback below applies only when the reranker produced no usable indices at all.
+      return ordered.Count > 0 || dropped > 0 ? ordered : rows;
    }
 
    /// <summary>

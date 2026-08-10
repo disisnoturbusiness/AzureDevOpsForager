@@ -198,26 +198,47 @@ public static class Config
    public static int MinFtsRank { get; set; } = 10;
 
    /// <summary>
-   /// Maximum cosine distance (0..2) a vector candidate may have to enter fusion. 2.0 is the top of the
-   /// cosine-distance range, i.e. the filter is effectively disabled — which is the intended default.
+   /// Maximum cosine distance (0..2) a vector candidate may have to enter fusion. This is a SAFETY RAIL
+   /// against pathological vectors, not a relevance filter — see <see cref="MinRerankScore"/> for the
+   /// control that actually decides relevance.
    /// <para>
-   /// Do not tighten this without measuring the distance distribution of the embedding model actually in
-   /// use. The cut is applied INSIDE the VECTOR_SEARCH candidate query (see SearchCodeProcDdl), so a value
-   /// below the model's real NL-to-code distance floor empties the vector leg completely, with no error:
-   /// RRF then fuses the full-text signals alone and every result comes back MatchSource='FullText' with a
-   /// zero VectorRRF. That is a silent, hard-to-spot failure, not a graceful degradation.
+   /// Do not tighten this without measuring the distance distribution of the embedding model AND corpus
+   /// actually in use. The cut is applied INSIDE the VECTOR_SEARCH candidate query (see
+   /// SearchCodeProcDdl), so a value below the real natural-language-to-code distance floor empties the
+   /// vector leg completely, with no error: RRF then fuses the full-text signals alone and every result
+   /// comes back MatchSource='FullText' with a zero VectorRRF. That is a silent failure, not a graceful
+   /// degradation. The previous default of 0.5 did exactly this — it was inert under e5-large-v2, whose
+   /// distances run 0.13-0.22 and never reached it, then silently discarded nearly everything once
+   /// bge-code-v1 moved the distribution up.
    /// </para>
    /// <para>
-   /// Concretely: the previous default of 0.5 was tuned for e5-large-v2, which embeds queries and passages
-   /// symmetrically ("query: "/"passage: ") and yields small distances. bge-code-v1 is asymmetric here —
-   /// EmbedQueryAsync wraps the query in an &lt;instruct&gt; envelope while EmbedPassageAsync embeds raw — so
-   /// its distances sit higher: measured code-to-code 0.11-0.44, but natural-language-to-code ~0.49 and up.
-   /// A 0.5 ceiling therefore discarded every realistic query. Filtering by raw distance ahead of RRF is
-   /// the wrong knob anyway: VECTOR_SEARCH already returns only TOP (200) ordered by distance, RRF ranks
-   /// rather than scores, and the cross-encoder reranker is the real precision gate.
+   /// Measured on this corpus with bge-code-v1: every observed distance, relevant or not, falls in
+   /// 0.67-0.90. Critically, distance does NOT separate relevant from irrelevant here — an off-topic
+   /// query ("recipe for chocolate cake") returned 0.71-0.80 while a perfectly-answered one
+   /// ("how do we send email", whose top hit is EmailSender.SendEmailAsync) returned 0.81-0.87. Any
+   /// ceiling tight enough to reject the nonsense would discard the correct answers first. 1.0 therefore
+   /// sits clear of the observed maximum and only ever rejects genuinely degenerate vectors.
    /// </para>
    /// </summary>
-   public static double MaxVectorDistance { get; set; } = 2.0;
+   public static double MaxVectorDistance { get; set; } = 1.0;
+
+   /// <summary>
+   /// Minimum cross-encoder rerank score a result must reach to be returned. This is the relevance gate:
+   /// unlike vector distance, the reranker separates on-topic from off-topic cleanly — measured on this
+   /// corpus, genuinely relevant hits score 0.14-0.99 while off-topic ones score 0.0-0.0013, four orders
+   /// of magnitude apart. 0.001 sits inside that gap.
+   /// <para>
+   /// The effect is that a query with no real answer returns few results or none, instead of always
+   /// padding to NResults with confident-looking noise. Set to 0 to disable and always return the full
+   /// reranked list.
+   /// </para>
+   /// <para>
+   /// Only applied when reranking actually ran and returned scores. The reranker is deliberately
+   /// fail-soft, so if it is unavailable the results keep their RRF order and this floor is skipped
+   /// entirely — otherwise an outage in the reranker would silently empty every search.
+   /// </para>
+   /// </summary>
+   public static double MinRerankScore { get; set; } = 0.001;
 
    /// <summary>
    /// Path to the bge-reranker-v2-m3 cross-encoder ONNX model (its sentencepiece.bpe.model is expected
@@ -534,8 +555,22 @@ public static class Config
          else
          {
             MaxVectorDistance = maxVectorDistance;
-            if( maxVectorDistance < 0.6 )
-               Logger.Warn( $"MaxVectorDistance is {maxVectorDistance}, which is tight enough to drop most natural-language matches on an asymmetric embedding model (bge-code-v1 NL-to-code starts near 0.49). Set 2.0 to disable the cut if the vector leg looks empty.", "Config" );
+            if( maxVectorDistance < 0.95 )
+               Logger.Warn( $"MaxVectorDistance is {maxVectorDistance}. Measured bge-code-v1 distances on a code corpus span 0.67-0.90 whether or not the hit is relevant, so a ceiling in that range drops good results without excluding bad ones. Use MinRerankScore to control relevance; raise this to 1.0 if the vector leg looks empty.", "Config" );
+         }
+      }
+
+      if( config.TryGetValue( "MinRerankScore", out var minRerankScoreText ) && double.TryParse( minRerankScoreText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minRerankScore ) )
+      {
+         // Negative is meaningless; a high floor would silently return nothing for every query, which is
+         // the same class of failure the distance ceiling caused. Reject rather than accept quietly.
+         if( minRerankScore < 0 || minRerankScore > 1 )
+            Logger.Warn( $"Ignoring MinRerankScore '{minRerankScoreText}': must be in [0, 1]. Keeping {MinRerankScore}.", "Config" );
+         else
+         {
+            MinRerankScore = minRerankScore;
+            if( minRerankScore > 0.1 )
+               Logger.Warn( $"MinRerankScore is {minRerankScore}, which is high enough to discard genuinely relevant results (measured on-topic hits score from about 0.14). Expect empty result sets.", "Config" );
          }
       }
    }
