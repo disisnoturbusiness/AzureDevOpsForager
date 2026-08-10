@@ -265,6 +265,22 @@ public class AzdoIndexerService : IDisposable
    /// </summary>
    private void ConfigureEmbeddingSource()
    {
+      // The indexer prefers LOCAL; the Server (Server.cs) prefers the HUGGING FACE endpoint. That is
+      // intentional on both sides, but it means configuring BOTH silently indexes with one model and
+      // queries with another. Since EmbeddingDimension is a single global, the two models cannot even
+      // agree on vector width — the corpus ends up unsearchable, or searchable but semantically wrong,
+      // with no error anywhere. Say so loudly rather than letting it be discovered from bad results.
+      if( Config.IsLocalModelConfigured && Config.HuggingFaceEnabled )
+      {
+         Console.WriteLine();
+         Console.WriteLine( "   ***  WARNING: both a local ONNX model and a Hugging Face endpoint are configured.  ***" );
+         Console.WriteLine( "   ***  This indexer will embed with the LOCAL model, but the Server queries with the ***" );
+         Console.WriteLine( "   ***  HF endpoint. Different models produce incompatible vectors. Unset either      ***" );
+         Console.WriteLine( "   ***  OnnxModelPath or HuggingFaceEmbedUrl, then run a full reindex.                ***" );
+         Console.WriteLine();
+         Logger.Warn( "Both OnnxModelPath and HuggingFaceEmbedUrl are configured; indexer uses local, Server uses Hugging Face. Vectors will be incompatible.", "Indexer" );
+      }
+
       if( Config.IsLocalModelConfigured )
       {
          _localEmbed = new EmbeddingService( Config.OnnxModelPath );

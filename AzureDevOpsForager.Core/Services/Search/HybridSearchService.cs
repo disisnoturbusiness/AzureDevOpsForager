@@ -154,7 +154,13 @@ public class HybridSearchService : IDisposable
          health.VectorPointCount = vectorInfo.PointCount;
          health.VectorStatus = vectorInfo.Status;
 
-         health.Status = "healthy";
+         // The overall verdict must follow the vector store rather than merely reporting that no
+         // exception was thrown. Previously this was an unconditional "healthy", so a Red or Error
+         // vector store still surfaced as a healthy service — hiding the one failure that matters
+         // most, since a dead vector leg degrades search to full-text without any visible error.
+         health.Status = vectorInfo.Status == "Green" ? "healthy" : "degraded";
+         if( vectorInfo.Status != "Green" )
+            health.Error = vectorInfo.Detail;
       }
       catch( Exception exception )
       {
@@ -260,6 +266,19 @@ public class HybridSearchService : IDisposable
             } ) );
          }
       }
+
+      // Make an empty vector leg observable. When the distance ceiling (or a missing/unpopulated
+      // index) filters every vector candidate away, the proc still succeeds and still returns rows —
+      // they are just all full-text. Without this line that degradation is completely invisible:
+      // the API looks fine, /health looks fine, and only the match_source field betrays it.
+      var vectorBackedRows = rows.Count( r => r.Meta.TryGetValue( "match_source", out var source )
+                                              && source != "FullText" );
+      if( rows.Count > 0 && vectorBackedRows == 0 )
+         Logger.Warn( $"Vector leg returned no candidates for \"{question}\" — all {rows.Count} results are full-text only. " +
+                      $"MaxVectorDistance={Config.MaxVectorDistance}, EmbeddingDimension={Config.EmbeddingDimension}. " +
+                      "If this is every query, the distance ceiling is likely below the embedding model's real distance floor.", "Search" );
+      else
+         Logger.Info( $"Fused {rows.Count} rows for \"{question}\" ({vectorBackedRows} vector-backed).", "Search" );
 
       return rows;
    }

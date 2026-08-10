@@ -114,13 +114,30 @@
       const r = await fetch("/health", { headers: { Accept: "application/json" } });
       if (!r.ok) throw new Error("status " + r.status);
       const h = await r.json();
+      const status = h.status ?? h.Status;
       const files = h.ftsFileCount ?? h.FtsFileCount;
       const vectors = h.vectorPointCount ?? h.VectorPointCount;
-      healthEl.classList.add("ok");
-      healthEl.classList.remove("bad");
+
+      // HTTP 200 does not mean the stores are ready. While the serverless SQL database is
+      // resuming, /health answers 200 with status "error", zero counts and a login-failure
+      // message. Rendering those counts verbatim tells a first-time visitor the corpus is
+      // empty ("0 files") — worse than saying nothing — so show a warm-up and re-poll.
+      if (status === "error") {
+        healthEl.classList.add("bad");
+        healthEl.classList.remove("ok");
+        healthText.textContent = "warming up";
+        setTimeout(loadHealth, 15000);
+        return;
+      }
+
+      // "degraded" means the query path is up but the vector store is not fully healthy, so the
+      // counts are real and worth showing — just don't present it as a clean bill of health.
+      const degraded = status === "degraded";
+      healthEl.classList.toggle("ok", !degraded);
+      healthEl.classList.toggle("bad", degraded);
       const fileTxt = files != null ? Number(files).toLocaleString() + " files" : "online";
       const vecTxt = vectors != null && Number(vectors) > 0 ? " · " + Number(vectors).toLocaleString() + " chunks" : "";
-      healthText.textContent = fileTxt + vecTxt;
+      healthText.textContent = fileTxt + vecTxt + (degraded ? " · vectors degraded" : "");
     } catch (e) {
       healthEl.classList.add("bad");
       healthEl.classList.remove("ok");
