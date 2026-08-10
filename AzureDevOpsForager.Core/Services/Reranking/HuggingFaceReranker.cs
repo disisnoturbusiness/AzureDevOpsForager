@@ -93,7 +93,10 @@ public class HuggingFaceReranker : IReranker
 
          var scored = ParseScores( body, candidates );
          if( scored.Count == 0 )
+         {
+            Report( $"endpoint returned no usable scores for model '{Config.RerankerModelName}'" );
             return FallbackOriginalOrder( candidates, topK );
+         }
 
          return scored.OrderByDescending( result => result.Score ).Take( topK ).ToList();
       }
@@ -101,8 +104,15 @@ public class HuggingFaceReranker : IReranker
       {
          throw;
       }
-      catch
+      catch( Exception exception )
       {
+         // Reported rather than swallowed. Degrading to retrieval order is the right behaviour, but doing
+         // it silently means a persistent misconfiguration looks identical to the reranker simply being
+         // unimpressed by the results. The model name is included because it is sent in the request body
+         // and must match what the endpoint actually serves — pointing HuggingFaceRerankUrl at a different
+         // endpoint without also changing RerankerModelName makes vLLM reject every call with
+         // "The model `...` does not exist", which is exactly how this fallback started firing constantly.
+         Report( $"{exception.GetType().Name}: {exception.Message} (model '{Config.RerankerModelName}')" );
          return FallbackOriginalOrder( candidates, topK );
       }
    }
@@ -157,10 +167,41 @@ public class HuggingFaceReranker : IReranker
       }
    }
 
-   /// <summary>Fail-soft result: the candidates in their original retrieval order, truncated to topK.</summary>
+   /// <summary>
+   /// Writes a rerank degradation notice to both the console and the log file. Console because that is
+   /// what surfaces in a hosted platform's log stream; the log file because that is what survives a
+   /// restart. Rate-limiting is deliberately omitted: a reranker that is failing on every request should
+   /// be noisy, since the visible symptom otherwise is only slightly worse ordering.
+   /// </summary>
+   private static void Report( string detail )
+   {
+      var message = $"[RERANK] Falling back to retrieval order — {detail}";
+      Console.WriteLine( message );
+      Logger.Warn( message, "Rerank" );
+   }
+
+   /// <summary>
+   /// Fail-soft result: the candidates in their original retrieval order, truncated to topK, carrying
+   /// high descending pseudo-scores rather than zeros.
+   /// <para>
+   /// The scores matter as much as the order. This previously emitted 0.0 for every candidate, which is
+   /// indistinguishable from the reranker having genuinely judged everything irrelevant — so a downstream
+   /// relevance gate reads a reranker OUTAGE as "this corpus has no answer" and returns nothing for every
+   /// query. That is the opposite of failing soft, and it is what happened when the endpoint began
+   /// rejecting requests: search silently went from working to returning nothing at all, with the
+   /// reranker's own fallback causing it.
+   /// </para>
+   /// <para>
+   /// Emitting descending values just under 1.0 preserves the retrieval order, keeps the relative spacing
+   /// tight enough that no ratio-based gate discards anything, and matches BgeReranker's fallback so the
+   /// local and hosted paths degrade identically.
+   /// </para>
+   /// </summary>
    private static IReadOnlyList<RerankerResult> FallbackOriginalOrder( IReadOnlyList<RerankerCandidate> candidates, int topK )
    {
-      return candidates.Take( topK ).Select( candidate => new RerankerResult( candidate.OriginalIndex, 0.0 ) ).ToList();
+      return candidates.Take( topK )
+         .Select( ( candidate, i ) => new RerankerResult( candidate.OriginalIndex, 1.0 - ( i * 0.001 ) ) )
+         .ToList();
    }
 
    #endregion

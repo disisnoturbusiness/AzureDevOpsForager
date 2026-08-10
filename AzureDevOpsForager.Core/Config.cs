@@ -150,7 +150,15 @@ public static class Config
    /// Model name sent in the hosted rerank request body. vLLM's OpenAI-compatible /rerank route expects
    /// the served model's name; this default matches the deployed sequence-classification conversion.
    /// </summary>
-   public static string RerankerModelName { get; set; } = "tomaarsen/Qwen3-Reranker-4B-seq-cls";
+   /// <remarks>
+   /// This value is sent in the /rerank request body and MUST match the model the endpoint actually
+   /// serves — vLLM rejects a mismatch outright with "The model `...` does not exist". It is therefore
+   /// COUPLED to <see cref="HuggingFaceRerankUrl"/>: changing one without the other breaks every rerank
+   /// call, and because reranking is fail-soft the only symptom is degraded ordering rather than an
+   /// error. Readable from RERANKER_MODEL_NAME so the pair can be swapped together as settings.
+   /// </remarks>
+   public static string RerankerModelName { get; set; } =
+      System.Environment.GetEnvironmentVariable( "RERANKER_MODEL_NAME" ) ?? "tomaarsen/Qwen3-Reranker-4B-seq-cls";
 
    /// <summary>
    /// The Hugging Face API token, resolved from the HF_TOKEN environment variable or the encrypted
@@ -252,6 +260,14 @@ public static class Config
    /// cross-encoder emitting a top score below 1e-6 is saying "nothing here matches", whatever its
    /// calibration. It should never be raised to a value that tries to express relevance — that is the
    /// ratio's job, and conflating the two is what made the absolute floor fragile.
+   /// </para>
+   /// <para>
+   /// This guard is only safe because a FAILING reranker no longer reports zeros. HuggingFaceReranker's
+   /// fail-soft path used to emit 0.0 for every candidate, which is indistinguishable from the reranker
+   /// having judged everything irrelevant — so an endpoint outage was read as "no answer exists" and
+   /// emptied EVERY search rather than degrading to retrieval order. Both reranker implementations now
+   /// fall back to high descending pseudo-scores, which leaves this guard inert during an outage. If that
+   /// ever regresses, this one setting becomes a single point of failure for all search.
    /// </para>
    /// </summary>
    public static double MinRerankTopScore { get; set; } = ReadEnvDouble( "MINRERANK_TOP_SCORE", 0.000001 );
