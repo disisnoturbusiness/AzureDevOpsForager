@@ -1,0 +1,102 @@
+name: Deploy demo
+
+# Every push to main redeploys https://azuredevops.aidataforager.com.
+# Authentication is OIDC: the workflow exchanges a short-lived GitHub token for an Azure
+# one, so no publish profile or client secret is stored in this repo. The federated
+# credential on the app registration is pinned to refs/heads/main, so a fork or a pull
+# request branch cannot obtain a token even though this repository is public.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: azuredevopsforager
+  PUBLISH_DIR: publish
+
+jobs:
+  # The test project targets net8.0-windows and references the WinForms Indexer, so it
+  # cannot run on a Linux runner. It gates the deploy rather than running alongside it.
+  test:
+    runs-on: windows-latest
+    if: github.repository == 'disisnoturbusiness/AzureDevOpsForager'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run tests
+        run: dotnet test AzureDevOpsForager.Tests/AzureDevOpsForager.Tests.csproj -c Release --nologo
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.repository == 'disisnoturbusiness/AzureDevOpsForager'
+
+    # id-token is what lets azure/login mint the OIDC assertion. contents:read is all the
+    # checkout needs — the job is deliberately given nothing it can write back to the repo.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # AzureDevOpsForager.Server.csproj bakes <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+      # for the desktop story. The App Service is Linux, so the RID must be overridden here
+      # or the deployed build will not start. Framework-dependent keeps the payload small
+      # enough that B1's disk is not a problem.
+      - name: Publish for Linux
+        run: >
+          dotnet publish AzureDevOpsForager.Server/AzureDevOpsForager.Server.csproj
+          -c Release -r linux-x64 --self-contained false
+          -o ${{ env.PUBLISH_DIR }} --nologo
+
+      # config.json lives on the server, not in this repo, and holds the required
+      # "Port": "8080". A clean deploy would delete it and the app would fail to bind, so
+      # this guards against it ever being added to the publish output by accident.
+      - name: Fail if the build would overwrite the server's config.json
+        run: |
+          if [ -f "${{ env.PUBLISH_DIR }}/config.json" ]; then
+            echo "::error::publish output contains config.json; it would overwrite the server's Port setting"
+            exit 1
+          fi
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Zip deploy is incremental by default, which is what preserves config.json. The app
+      # is deliberately NOT stopped first: OneDeploy is processed by the SCM site, and
+      # stopping the app beforehand makes the deployment poll hang.
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: ${{ env.PUBLISH_DIR }}
+
+      # A green deploy step only means the files landed. Poll /health until the app has
+      # actually restarted and reconnected to SQL, so a broken deploy fails the run rather
+      # than sitting there looking successful.
+      - name: Verify /health
+        run: |
+          for attempt in $(seq 1 30); do
+            body=$(curl -fsS --max-time 60 https://azuredevops.aidataforager.com/health || true)
+            echo "attempt $attempt: ${body:-<no response>}"
+            case "$body" in
+              *'"status":"healthy"'*)
+                echo "healthy"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::/health did not report healthy within 5 minutes"
+          exit 1
