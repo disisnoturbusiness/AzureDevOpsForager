@@ -93,6 +93,13 @@ public class HybridSearchService : IDisposable
          {
             try
             {
+               // Start waking the reranker NOW, concurrently with embedding, rather than when the rerank
+               // stage is reached. Both are scale-to-zero endpoints, and the reranker needs only the query
+               // text and candidate documents — nothing the embedder produces. Waiting made the two cold
+               // starts ADDITIVE: measured on the 4B, 30.9s of embedder followed by 115.9s of reranker for
+               // ~147s total. Overlapping them makes the cost max(embed, rerank) instead of the sum.
+               StartRerankerWarmup();
+
                var queryVector = await _embeddingService.EmbedQueryAsync( request.Question );
                return await SearchViaProcAsync( queryVector, request );
             }
@@ -135,6 +142,42 @@ public class HybridSearchService : IDisposable
       }
 
       return response;
+   }
+
+   /// <summary>
+   /// Fires a throwaway rerank request without awaiting it, purely to start a scale-to-zero reranker
+   /// endpoint waking while the embedding call is in flight.
+   /// <para>
+   /// Deliberately fire-and-forget: the result is discarded and failures are ignored, because this is an
+   /// optimisation, not a step. The real rerank later queues behind the same wake-up, so the only effect
+   /// is that the endpoint has a head start equal to however long embedding takes.
+   /// </para>
+   /// <para>
+   /// TWO candidates, not one: RerankAsync short-circuits a single candidate and returns immediately
+   /// without contacting the endpoint, so a one-item warm-up would wake nothing at all.
+   /// </para>
+   /// </summary>
+   private void StartRerankerWarmup()
+   {
+      if( _reranker == null || !Config.RerankerEnabled )
+         return;
+
+      _ = Task.Run( async () =>
+      {
+         try
+         {
+            await _reranker.RerankAsync( "warmup", new List<RerankerCandidate>
+            {
+               new RerankerCandidate( 0, "warmup" ),
+               new RerankerCandidate( 1, "warmup" )
+            }, 1 );
+         }
+         catch
+         {
+            // Best effort. A failure here costs nothing: the real rerank call reports its own problems,
+            // and reranking is fail-soft regardless.
+         }
+      } );
    }
 
    /// <summary>
