@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Run tests
         run: dotnet test AzureDevOpsForager.Tests/AzureDevOpsForager.Tests.csproj -c Release --nologo
@@ -46,7 +46,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       # AzureDevOpsForager.Server.csproj bakes <RuntimeIdentifier>win-x64</RuntimeIdentifier>
       # for the desktop story. The App Service is Linux, so the RID must be overridden here
