@@ -38,5 +38,6 @@
   "RrfChunkFtsWeight": "30",
   "RrfFileFtsWeight": "30",
   "MinFtsRank": "10",
-  "MaxVectorDistance": "0.5"
+  "_comment_maxvectordistance": "Cosine-distance ceiling (0..2] for vector candidates entering RRF. 2.0 disables the cut and is the recommended default. The cut is applied INSIDE VECTOR_SEARCH, so a value below the embedding model's real natural-language-to-code distance floor empties the vector leg with no error and search silently degrades to full-text. bge-code-v1 measures ~0.11-0.44 code-to-code but ~0.49+ for NL-to-code, so the old 0.5 (an e5-large-v2 value) discarded every realistic query. Re-measure before tightening.",
+  "MaxVectorDistance": "2.0"
 }
