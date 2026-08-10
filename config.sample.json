@@ -38,6 +38,9 @@
   "RrfChunkFtsWeight": "30",
   "RrfFileFtsWeight": "30",
   "MinFtsRank": "10",
-  "_comment_maxvectordistance": "Cosine-distance ceiling (0..2] for vector candidates entering RRF. 2.0 disables the cut and is the recommended default. The cut is applied INSIDE VECTOR_SEARCH, so a value below the embedding model's real natural-language-to-code distance floor empties the vector leg with no error and search silently degrades to full-text. bge-code-v1 measures ~0.11-0.44 code-to-code but ~0.49+ for NL-to-code, so the old 0.5 (an e5-large-v2 value) discarded every realistic query. Re-measure before tightening.",
-  "MaxVectorDistance": "2.0"
+  "_comment_maxvectordistance": "SAFETY RAIL, not a relevance filter (use MinRerankScore for relevance). Cosine-distance ceiling (0..2] for vector candidates entering RRF, applied INSIDE VECTOR_SEARCH — so a value below the model's real NL-to-code distance floor empties the vector leg with no error and search silently degrades to full-text. Measured with bge-code-v1 on a code corpus, EVERY distance falls in 0.67-0.90 whether or not the hit is relevant, so a tighter ceiling drops good results before bad ones. The old 0.5 was an e5-large-v2 value that was inert there (e5 runs 0.13-0.22) and discarded ~everything once the model changed. Re-measure per model AND corpus before tightening.",
+  "MaxVectorDistance": "1.0",
+
+  "_comment_minrerankscore": "Relevance gate: minimum cross-encoder rerank score a result must reach to be returned. Unlike distance, the reranker separates cleanly — measured on-topic hits score 0.14-0.99, off-topic ones 0.0-0.0013. 0.001 sits inside that gap, so a question the corpus cannot answer returns few results or none instead of padding to NResults with noise. Set 0 to disable. Skipped entirely when the reranker is unavailable, so a reranker outage cannot empty every search.",
+  "MinRerankScore": "0.001"
 }

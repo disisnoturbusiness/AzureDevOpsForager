@@ -102,7 +102,7 @@ CREATE OR ALTER PROCEDURE dbo.SearchCode
    @ChunkFtsWeight INT = 30,
    @FileFtsWeight  INT = 30,
    @MinFtsRank     INT = 10,
-   @MaxDistance    FLOAT = 2.0
+   @MaxDistance    FLOAT = 1.0
 AS
 BEGIN
    SET NOCOUNT ON;
