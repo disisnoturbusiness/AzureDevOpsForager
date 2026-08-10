@@ -75,6 +75,22 @@ KEY INDEX PK_CodeChunks ON CODEINDEX_FTC WITH (CHANGE_TRACKING AUTO);";
    /// the client gets one already-scored result set. Declared CREATE OR ALTER so re-running is idempotent.
    /// The @QueryVector dimension follows <see cref="Config.EmbeddingDimension"/> so the proc always
    /// matches the embedding model in use (bge-code-v1 = 1536; local e5-large-v2 = 1024).
+   /// The vector candidate step is built as dynamic SQL because the legal VECTOR_SEARCH grammar depends
+   /// on the DiskANN index version, not on the product:
+   ///   * Version 3+ (Azure SQL Database and Fabric today) requires TOP (N) WITH APPROXIMATE and rejects
+   ///     TOP_N with "Vector search with version 3 index does not support explicit TOP_N parameter"
+   ///     (Msg 42274), which fails the whole CREATE OR ALTER.
+   ///   * Earlier versions (SQL Server 2025 today) require the deprecated TOP_N argument and cannot parse
+   ///     WITH APPROXIMATE at all.
+   /// Routing both forms through sp_executesql means the branch the running engine cannot parse is never
+   /// compiled, so one procedure body serves both. The version is read from sys.vector_indexes'
+   /// build_parameters JSON ("Version"), defaulting to the modern form when no vector index is present.
+   /// WITH APPROXIMATE is not optional decoration: a bare TOP (200) parses fine but silently downgrades
+   /// to an exact kNN full scan that never touches the vector index. It also enables iterative filtering,
+   /// so @ChunkType/@MaxDistance are applied during the search rather than after it, and it requires
+   /// ORDER BY on the distance column alone, ascending — hence the tie-breaking ROW_NUMBER is applied
+   /// afterwards against #VectorHits. That temp table also keeps the dynamic SQL out of an INSERT ... EXEC,
+   /// so callers can still consume this procedure with INSERT ... EXEC themselves (which cannot nest).
    /// </summary>
    private static string SearchCodeProcDdl => $@"
 CREATE OR ALTER PROCEDURE dbo.SearchCode
@@ -94,16 +110,33 @@ BEGIN
       REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
          @SearchText, '''', ' '), '""', ' '), '&', ' '), '|', ' '), '~', ' '), '!', ' '), 4000);
 
+   CREATE TABLE #VectorHits (ChunkId INT, Distance FLOAT);
+
+   DECLARE @VectorIndexVersion INT = TRY_CAST(JSON_VALUE(
+      (SELECT TOP (1) build_parameters FROM sys.vector_indexes WHERE object_id = OBJECT_ID('dbo.CodeChunks')),
+      '$.Version') AS INT);
+
+   DECLARE @VectorSql NVARCHAR(MAX) = N'INSERT INTO #VectorHits (ChunkId, Distance) ' +
+      CASE WHEN ISNULL(@VectorIndexVersion, 3) >= 3 THEN N'
+         SELECT TOP (200) WITH APPROXIMATE c.Id, vs.distance
+         FROM VECTOR_SEARCH(TABLE = dbo.CodeChunks AS c, COLUMN = Embedding,
+              SIMILAR_TO = @QueryVector, METRIC = ''cosine'') AS vs
+         WHERE (@ChunkType IS NULL OR c.ChunkType = @ChunkType) AND vs.distance <= @MaxDistance
+         ORDER BY vs.distance'
+      ELSE N'
+         SELECT TOP (200) c.Id, vs.distance
+         FROM VECTOR_SEARCH(TABLE = dbo.CodeChunks AS c, COLUMN = Embedding,
+              SIMILAR_TO = @QueryVector, METRIC = ''cosine'', TOP_N = 200) AS vs
+         WHERE (@ChunkType IS NULL OR c.ChunkType = @ChunkType) AND vs.distance <= @MaxDistance
+         ORDER BY vs.distance' END;
+
+   EXEC sp_executesql @VectorSql,
+        N'@QueryVector VECTOR({Config.EmbeddingDimension}), @ChunkType NVARCHAR(50), @MaxDistance FLOAT',
+        @QueryVector = @QueryVector, @ChunkType = @ChunkType, @MaxDistance = @MaxDistance;
+
    DECLARE @VectorResults TABLE (ChunkId INT, Distance FLOAT, VectorRank INT);
    INSERT INTO @VectorResults (ChunkId, Distance, VectorRank)
-   SELECT ranked.ChunkId, ranked.Distance,
-          ROW_NUMBER() OVER (ORDER BY ranked.Distance ASC, ranked.ChunkId ASC)
-   FROM (
-      SELECT c.Id AS ChunkId, vs.distance AS Distance
-      FROM VECTOR_SEARCH(TABLE = dbo.CodeChunks AS c, COLUMN = Embedding,
-           SIMILAR_TO = @QueryVector, METRIC = 'cosine', TOP_N = 200) AS vs
-      WHERE (@ChunkType IS NULL OR c.ChunkType = @ChunkType) AND vs.distance <= @MaxDistance
-   ) ranked;
+   SELECT ChunkId, Distance, ROW_NUMBER() OVER (ORDER BY Distance ASC, ChunkId ASC) FROM #VectorHits;
 
    DECLARE @ChunkFts TABLE (ChunkId INT, FtsRank INT, ChunkFtsRank INT);
    IF LEN(LTRIM(@SafeText)) > 0
@@ -299,7 +332,9 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
          await ExecAsync( connection, CodeChunksFtsDdl );
 
       // Hybrid RRF search proc (vector + chunk-FTS + file-FTS fusion). CREATE OR ALTER makes this idempotent.
-      await TryExecAsync( connection, SearchCodeProcDdl );
+      // Still non-fatal (an engine without VECTOR support can't create it and should keep FTS-only), but the
+      // failure is logged: a silently-missing proc drops the demo to keyword search with no visible signal.
+      await TryExecAsync( connection, SearchCodeProcDdl, "dbo.SearchCode create" );
    }
 
    /// <summary>
@@ -549,7 +584,7 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
          await ExecAsync( connection, "CREATE FULLTEXT CATALOG CODEINDEX_FTC AS DEFAULT;" );
       await ExecAsync( connection, CodeFilesFtsDdl );
       await ExecAsync( connection, CodeChunksFtsDdl );
-      await TryExecAsync( connection, SearchCodeProcDdl );
+      await TryExecAsync( connection, SearchCodeProcDdl, "dbo.SearchCode recreate after staging swap" );
    }
 
    /// <summary>Run a DDL/DML batch as a non-query with a generous 120s timeout (index/table DDL can be slow).</summary>
@@ -562,10 +597,23 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
    /// <summary>
    /// Run a batch but swallow any exception. Used for steps that are idempotent and best-effort (e.g. the
    /// preview-features toggle, or dropping an index that may not exist), where a failure is expected and fine.
+   /// Pass <paramref name="stepLabel"/> for steps whose failure degrades search rather than being harmless:
+   /// the batch still does not throw, but the reason is written to the console instead of vanishing.
    /// </summary>
-   private static async Task TryExecAsync( SqlConnection connection, string sql )
+   /// <param name="connection">An open connection to the index database.</param>
+   /// <param name="sql">The DDL/DML batch to execute.</param>
+   /// <param name="stepLabel">Optional name of the step, logged as a warning when the batch fails.</param>
+   private static async Task TryExecAsync( SqlConnection connection, string sql, string stepLabel = null )
    {
-      try { await ExecAsync( connection, sql ); } catch { /* idempotent best-effort */ }
+      try
+      {
+         await ExecAsync( connection, sql );
+      }
+      catch( Exception execException )
+      {
+         if( stepLabel != null )
+            Console.WriteLine( $"[WARN] {stepLabel} failed — search will run degraded until this is fixed: {execException.Message}" );
+      }
    }
 
    /// <summary>Return true when the given EXISTS-style probe query returns any non-null scalar (i.e. a row).</summary>
