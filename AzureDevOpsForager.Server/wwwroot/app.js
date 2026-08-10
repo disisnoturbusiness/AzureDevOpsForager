@@ -529,18 +529,25 @@
 
   // ===================================================================
   // keep-warm heartbeat
-  // While a tab is open, ping /query every 10 min so the scale-to-zero HF embed/rerank
+  // While a tab is VISIBLE, ping /query every 10 min so the scale-to-zero HF embed/rerank
   // endpoints and the serverless SQL stay hot for whoever's looking. One /query exercises
   // the whole chain (site -> SQL -> embed -> rerank), so it warms all three in a single
-  // call. This runs only in a live tab, so it costs nothing when nobody has the site open —
-  // the backend just cools back down on its own.
+  // call. Hidden tabs are skipped: setInterval keeps firing in a backgrounded tab, so
+  // without the visibility gate one pinned tab bills the HF endpoints around the clock.
   // ===================================================================
   const HEARTBEAT_MS = 10 * 60 * 1000; // 10 minutes
   let heartbeatBusy = false;
+  let lastBeatAt = 0;
+
+  function tabVisible() {
+    return document.visibilityState === "visible";
+  }
 
   async function heartbeat() {
     if (heartbeatBusy) return;              // don't stack pings if one runs long (cold start)
+    if (!tabVisible()) return;              // nobody's looking — let the backend cool down
     heartbeatBusy = true;
+    lastBeatAt = Date.now();
     healthText.textContent = "keeping warm…";
     try {
       await fetch("/query", {
@@ -555,6 +562,13 @@
       heartbeatBusy = false;
     }
   }
+
+  // Returning to a tab that has gone cold should warm it right away instead of making the
+  // viewer wait out the rest of the interval. Rate-limited to one beat per HEARTBEAT_MS so
+  // flipping between tabs can't stack up pings.
+  document.addEventListener("visibilitychange", () => {
+    if (tabVisible() && Date.now() - lastBeatAt >= HEARTBEAT_MS) heartbeat();
+  });
 
   // ===================================================================
   // boot
