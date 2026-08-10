@@ -102,7 +102,7 @@ CREATE OR ALTER PROCEDURE dbo.SearchCode
    @ChunkFtsWeight INT = 30,
    @FileFtsWeight  INT = 30,
    @MinFtsRank     INT = 10,
-   @MaxDistance    FLOAT = 0.5
+   @MaxDistance    FLOAT = 2.0
 AS
 BEGIN
    SET NOCOUNT ON;
@@ -576,9 +576,12 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
    /// </summary>
    private static async Task RecreateLiveSearchObjectsAsync( SqlConnection connection )
    {
+      // Labelled: a silent DiskANN failure here leaves the corpus searchable only by full-text, which is
+      // the hardest kind of outage to notice from the outside. TryExecAsync only logs when given a label.
       await TryExecAsync( connection, @"
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_CodeChunks_Embedding' AND object_id=OBJECT_ID('dbo.CodeChunks'))
-               CREATE VECTOR INDEX IX_CodeChunks_Embedding ON dbo.CodeChunks(Embedding) WITH (metric='cosine', type='diskann');" );
+               CREATE VECTOR INDEX IX_CodeChunks_Embedding ON dbo.CodeChunks(Embedding) WITH (metric='cosine', type='diskann');",
+         "IX_CodeChunks_Embedding DiskANN index recreate after staging swap" );
 
       if( !await ExistsAsync( connection, "SELECT 1 FROM sys.fulltext_catalogs WHERE name = 'CODEINDEX_FTC'" ) )
          await ExecAsync( connection, "CREATE FULLTEXT CATALOG CODEINDEX_FTC AS DEFAULT;" );

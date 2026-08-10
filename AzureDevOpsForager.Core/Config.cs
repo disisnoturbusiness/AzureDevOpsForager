@@ -198,10 +198,26 @@ public static class Config
    public static int MinFtsRank { get; set; } = 10;
 
    /// <summary>
-   /// Maximum cosine distance (0..2) a vector candidate may have to enter fusion; larger distances are too
-   /// dissimilar to be worth ranking.
+   /// Maximum cosine distance (0..2) a vector candidate may have to enter fusion. 2.0 is the top of the
+   /// cosine-distance range, i.e. the filter is effectively disabled — which is the intended default.
+   /// <para>
+   /// Do not tighten this without measuring the distance distribution of the embedding model actually in
+   /// use. The cut is applied INSIDE the VECTOR_SEARCH candidate query (see SearchCodeProcDdl), so a value
+   /// below the model's real NL-to-code distance floor empties the vector leg completely, with no error:
+   /// RRF then fuses the full-text signals alone and every result comes back MatchSource='FullText' with a
+   /// zero VectorRRF. That is a silent, hard-to-spot failure, not a graceful degradation.
+   /// </para>
+   /// <para>
+   /// Concretely: the previous default of 0.5 was tuned for e5-large-v2, which embeds queries and passages
+   /// symmetrically ("query: "/"passage: ") and yields small distances. bge-code-v1 is asymmetric here —
+   /// EmbedQueryAsync wraps the query in an &lt;instruct&gt; envelope while EmbedPassageAsync embeds raw — so
+   /// its distances sit higher: measured code-to-code 0.11-0.44, but natural-language-to-code ~0.49 and up.
+   /// A 0.5 ceiling therefore discarded every realistic query. Filtering by raw distance ahead of RRF is
+   /// the wrong knob anyway: VECTOR_SEARCH already returns only TOP (200) ordered by distance, RRF ranks
+   /// rather than scores, and the cross-encoder reranker is the real precision gate.
+   /// </para>
    /// </summary>
-   public static double MaxVectorDistance { get; set; } = 0.5;
+   public static double MaxVectorDistance { get; set; } = 2.0;
 
    /// <summary>
    /// Path to the bge-reranker-v2-m3 cross-encoder ONNX model (its sentencepiece.bpe.model is expected
@@ -509,7 +525,19 @@ public static class Config
       if( config.TryGetValue( "MinFtsRank", out var minFtsRankText ) && int.TryParse( minFtsRankText, out var minFtsRank ) )
          MinFtsRank = minFtsRank;
       if( config.TryGetValue( "MaxVectorDistance", out var maxVectorDistanceText ) && double.TryParse( maxVectorDistanceText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxVectorDistance ) )
-         MaxVectorDistance = maxVectorDistance;
+      {
+         // Cosine distance is bounded to [0, 2]. A value outside that range — or at/near zero, which admits
+         // only vectors identical to the query — silently empties the vector leg instead of failing, so
+         // reject it loudly and keep the default rather than shipping a search with no semantic recall.
+         if( maxVectorDistance <= 0 || maxVectorDistance > 2 )
+            Logger.Warn( $"Ignoring MaxVectorDistance '{maxVectorDistanceText}': must be in (0, 2]. Keeping {MaxVectorDistance}.", "Config" );
+         else
+         {
+            MaxVectorDistance = maxVectorDistance;
+            if( maxVectorDistance < 0.6 )
+               Logger.Warn( $"MaxVectorDistance is {maxVectorDistance}, which is tight enough to drop most natural-language matches on an asymmetric embedding model (bge-code-v1 NL-to-code starts near 0.49). Set 2.0 to disable the cut if the vector leg looks empty.", "Config" );
+         }
+      }
    }
 
    #endregion Private Methods
