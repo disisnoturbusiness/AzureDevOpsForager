@@ -46,6 +46,8 @@ public class Server
       if( TryHandleServiceCommand( args ) )
          return;
 
+      LogEffectiveSearchConfiguration();
+
       var app = BuildApplication( args, isService );
 
       app.UseDefaultFiles();   // serve wwwroot/index.html at /
@@ -98,6 +100,35 @@ public class Server
       Config.LoadFromFile( configPath );
       Config.LoadUserOverrides();   // shared per-user overrides (model path, chosen DB) win over the per-exe config.json
       Config.EnsureDirectories();
+   }
+
+   /// <summary>
+   /// Prints the retrieval settings actually in force after all three config layers have been applied.
+   /// <para>
+   /// This exists because the values that decide whether search works at all arrive from a config.json
+   /// that is deliberately not in source control, so reading the repo tells you nothing about what a
+   /// given deployment is really running. A mis-set MaxVectorDistance silently empties the vector leg
+   /// and a mis-set MinRerankScore silently empties the result set — neither raises an error, so without
+   /// this line the only symptom is quietly worse results. One line at boot makes the effective
+   /// configuration a matter of record instead of an archaeology exercise.
+   /// </para>
+   /// Secrets and connection strings are deliberately excluded: this goes to a log that may be shipped
+   /// or pasted, and none of these values are sensitive on their own.
+   /// </summary>
+   private static void LogEffectiveSearchConfiguration()
+   {
+      var embedSource = Config.HuggingFaceEnabled ? "HuggingFace endpoint"
+         : File.Exists( Config.OnnxModelPath ) ? "local ONNX"
+         : "none (full-text only)";
+
+      var line = $"[CONFIG] EmbeddingDimension={Config.EmbeddingDimension} embedder={embedSource} " +
+                 $"MaxVectorDistance={Config.MaxVectorDistance} MinRerankScore={Config.MinRerankScore} " +
+                 $"reranker={( Config.RerankerEnabled ? "on" : "off" )} RerankerInputSize={Config.RerankerInputSize} " +
+                 $"RRF(v/c/f)={Config.RrfVectorWeight}/{Config.RrfChunkFtsWeight}/{Config.RrfFileFtsWeight} " +
+                 $"MinFtsRank={Config.MinFtsRank}";
+
+      Console.WriteLine( line );
+      Logger.Info( line, "Config" );
    }
 
    /// <summary>
