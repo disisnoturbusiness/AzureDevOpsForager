@@ -100,20 +100,20 @@ public class ConfigTests
       }
    }
 
-   private static double LoadMinRerankScore( string raw, double startingValue )
+   private static double LoadMinRerankScoreRatio( string raw, double startingValue )
    {
-      var orig = Config.MinRerankScore;
+      var orig = Config.MinRerankScoreRatio;
       var path = Path.Combine( Path.GetTempPath(), $"adf_mrs_{Guid.NewGuid():N}.json" );
       try
       {
-         Config.MinRerankScore = startingValue;
-         File.WriteAllText( path, JsonConvert.SerializeObject( new Dictionary<string, string> { ["MinRerankScore"] = raw } ) );
+         Config.MinRerankScoreRatio = startingValue;
+         File.WriteAllText( path, JsonConvert.SerializeObject( new Dictionary<string, string> { ["MinRerankScoreRatio"] = raw } ) );
          Config.LoadFromFile( path );
-         return Config.MinRerankScore;
+         return Config.MinRerankScoreRatio;
       }
       finally
       {
-         Config.MinRerankScore = orig;
+         Config.MinRerankScoreRatio = orig;
          if ( File.Exists( path ) ) File.Delete( path );
       }
    }
@@ -141,33 +141,35 @@ public class ConfigTests
     }
 
    [Theory]
-   [InlineData( "-0.1" )]
-   [InlineData( "1.5" )]
-   public void LoadFromFile_MinRerankScoreOutOfRange_IsRejectedAndPriorValueKept( string raw )
+   [InlineData( "-0.1" )]     // meaningless as a fraction
+   [InlineData( "1.5" )]      // nothing can exceed the top score, so this keeps only the single best hit
+   public void LoadFromFile_MinRerankScoreRatioOutOfRange_IsRejectedAndPriorValueKept( string raw )
    {
-      Assert.Equal( 0.001d, LoadMinRerankScore( raw, startingValue: 0.001 ), precision: 10 );
+      Assert.Equal( 0.1d, LoadMinRerankScoreRatio( raw, startingValue: 0.1 ), precision: 10 );
    }
 
    [Theory]
-   [InlineData( "0" )]        // legal: disables the gate entirely
+   [InlineData( "0" )]        // legal: disables the relative gate entirely
    [InlineData( "0.05" )]
-   [InlineData( "1" )]
-   public void LoadFromFile_MinRerankScoreInRange_IsApplied( string raw )
+   [InlineData( "1" )]        // legal: keeps only results tied with the best score
+   public void LoadFromFile_MinRerankScoreRatioInRange_IsApplied( string raw )
    {
       var expected = double.Parse( raw, System.Globalization.CultureInfo.InvariantCulture );
-      Assert.Equal( expected, LoadMinRerankScore( raw, startingValue: 0.001 ), precision: 10 );
+      Assert.Equal( expected, LoadMinRerankScoreRatio( raw, startingValue: 0.1 ), precision: 10 );
    }
 
    [Fact]
    public void Defaults_AreTheMeasuredValues()
    {
-      // Guards the two constants this project got wrong once already. MaxVectorDistance must sit clear
-      // of the observed 0.67-0.90 distance band, and MinRerankScore inside the gap between off-topic
-      // (<=0.0013) and on-topic (>=0.14) rerank scores. A future edit that reverts either should fail
-      // here rather than silently degrading search quality.
+      // Guards the constants this project has already got wrong twice in one day. MaxVectorDistance must
+      // sit clear of the measured 0.67-0.90 distance band. The rerank gate must stay RELATIVE: a ratio in
+      // a sane range, and a degenerate-top guard small enough that it only ever catches an all-zero result
+      // set. If MinRerankTopScore ever drifts up into the range where models score real hits, it has
+      // become the model-specific absolute floor that broke every search on a reranker swap.
       var freshMax = LoadMaxVectorDistance( "not-a-number", startingValue: Config.MaxVectorDistance );
       Assert.True( freshMax >= 0.95, $"MaxVectorDistance default {freshMax} is inside the measured distance band" );
-      Assert.True( Config.MinRerankScore > 0 && Config.MinRerankScore < 0.14,
-         $"MinRerankScore default {Config.MinRerankScore} is outside the off-topic/on-topic gap" );
+
+      Assert.InRange( Config.MinRerankScoreRatio, 0.01, 0.5 );
+      Assert.InRange( Config.MinRerankTopScore, 0.0, 0.001 );
    }
 }

@@ -223,22 +223,38 @@ public static class Config
    public static double MaxVectorDistance { get; set; } = 1.0;
 
    /// <summary>
-   /// Minimum cross-encoder rerank score a result must reach to be returned. This is the relevance gate:
-   /// unlike vector distance, the reranker separates on-topic from off-topic cleanly — measured on this
-   /// corpus, genuinely relevant hits score 0.14-0.99 while off-topic ones score 0.0-0.0013, four orders
-   /// of magnitude apart. 0.001 sits inside that gap.
+   /// Relevance gate, part one: a result is returned only if its cross-encoder score is at least this
+   /// FRACTION of the best score in the same result set. Default 0.1, i.e. keep anything within one
+   /// order of magnitude of the top hit.
    /// <para>
-   /// The effect is that a query with no real answer returns few results or none, instead of always
-   /// padding to NResults with confident-looking noise. Set to 0 to disable and always return the full
-   /// reranked list.
+   /// This is deliberately RELATIVE rather than an absolute score floor. An absolute floor is a property
+   /// of one specific model's score distribution, so it silently stops working the moment the reranker
+   /// is swapped — which is exactly what happened here: a floor calibrated against Qwen3-Reranker-4B
+   /// filtered out every single result when the endpoint was pointed at Qwen3-Reranker-0.6B, because the
+   /// smaller model scores on a different scale. Nothing errored; searches just returned nothing. A ratio
+   /// carries across models because it only depends on the shape of one result set, not on the absolute
+   /// numbers a given model happens to emit.
    /// </para>
    /// <para>
-   /// Only applied when reranking actually ran and returned scores. The reranker is deliberately
-   /// fail-soft, so if it is unavailable the results keep their RRF order and this floor is skipped
-   /// entirely — otherwise an outage in the reranker would silently empty every search.
+   /// Set to 0 to disable and always return the full reranked list.
    /// </para>
    /// </summary>
-   public static double MinRerankScore { get; set; } = 0.001;
+   public static double MinRerankScoreRatio { get; set; } = 0.1;
+
+   /// <summary>
+   /// Relevance gate, part two: if the BEST score in a result set is below this, the whole set is
+   /// discarded and the query returns nothing.
+   /// <para>
+   /// The ratio alone cannot answer "does this corpus contain any answer at all?" — when every candidate
+   /// scores ~0, the top is also ~0 and everything sits within any ratio of it, so a pure ratio would
+   /// return a full page of noise for an unanswerable question. This guard is the one genuinely absolute
+   /// judgement, and it is kept deliberately tiny so it stays model-independent: any sigmoid-style
+   /// cross-encoder emitting a top score below 1e-6 is saying "nothing here matches", whatever its
+   /// calibration. It should never be raised to a value that tries to express relevance — that is the
+   /// ratio's job, and conflating the two is what made the absolute floor fragile.
+   /// </para>
+   /// </summary>
+   public static double MinRerankTopScore { get; set; } = 0.000001;
 
    /// <summary>
    /// Path to the bge-reranker-v2-m3 cross-encoder ONNX model (its sentencepiece.bpe.model is expected
@@ -560,17 +576,31 @@ public static class Config
          }
       }
 
-      if( config.TryGetValue( "MinRerankScore", out var minRerankScoreText ) && double.TryParse( minRerankScoreText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minRerankScore ) )
+      if( config.TryGetValue( "MinRerankScoreRatio", out var minRerankRatioText ) && double.TryParse( minRerankRatioText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minRerankRatio ) )
       {
-         // Negative is meaningless; a high floor would silently return nothing for every query, which is
-         // the same class of failure the distance ceiling caused. Reject rather than accept quietly.
-         if( minRerankScore < 0 || minRerankScore > 1 )
-            Logger.Warn( $"Ignoring MinRerankScore '{minRerankScoreText}': must be in [0, 1]. Keeping {MinRerankScore}.", "Config" );
+         // A ratio above 1 keeps only the single top hit (nothing can exceed the best score), and a
+         // negative one is meaningless. Both would quietly gut the result set rather than fail.
+         if( minRerankRatio < 0 || minRerankRatio > 1 )
+            Logger.Warn( $"Ignoring MinRerankScoreRatio '{minRerankRatioText}': must be in [0, 1]. Keeping {MinRerankScoreRatio}.", "Config" );
          else
          {
-            MinRerankScore = minRerankScore;
-            if( minRerankScore > 0.1 )
-               Logger.Warn( $"MinRerankScore is {minRerankScore}, which is high enough to discard genuinely relevant results (measured on-topic hits score from about 0.14). Expect empty result sets.", "Config" );
+            MinRerankScoreRatio = minRerankRatio;
+            if( minRerankRatio > 0.5 )
+               Logger.Warn( $"MinRerankScoreRatio is {minRerankRatio}: only results scoring within {minRerankRatio:P0} of the top hit survive, so most queries will return one or two results.", "Config" );
+         }
+      }
+
+      if( config.TryGetValue( "MinRerankTopScore", out var minTopScoreText ) && double.TryParse( minTopScoreText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minTopScore ) )
+      {
+         if( minTopScore < 0 || minTopScore > 1 )
+            Logger.Warn( $"Ignoring MinRerankTopScore '{minTopScoreText}': must be in [0, 1]. Keeping {MinRerankTopScore}.", "Config" );
+         else
+         {
+            MinRerankTopScore = minTopScore;
+            // This guard exists only to catch an all-zero result set. Raised into the range where real
+            // models score real hits, it becomes the model-specific absolute floor this design replaced.
+            if( minTopScore > 0.001 )
+               Logger.Warn( $"MinRerankTopScore is {minTopScore}, which is high enough to be acting as an absolute relevance floor. That is model-specific and breaks on a reranker swap — use MinRerankScoreRatio for relevance instead.", "Config" );
          }
       }
    }

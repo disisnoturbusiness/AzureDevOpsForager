@@ -298,10 +298,10 @@ public class HybridSearchService : IDisposable
       if( reranked == null || reranked.Count == 0 )
          return rows;
 
-      var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScore );
+      var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScoreRatio, Config.MinRerankTopScore );
 
       if( dropped > 0 )
-         Logger.Info( $"Dropped {dropped} result(s) below MinRerankScore={Config.MinRerankScore} for \"{question}\"; {ordered.Count} kept.", "Search" );
+         Logger.Info( $"Dropped {dropped} result(s) below {Config.MinRerankScoreRatio:P0} of the top rerank score for \"{question}\"; {ordered.Count} kept.", "Search" );
 
       // Deliberately NOT falling back to the unfiltered rows when everything is filtered out: an empty
       // result set is the correct, informative answer to a question this corpus cannot answer. The
@@ -324,28 +324,43 @@ public class HybridSearchService : IDisposable
    /// </summary>
    /// <param name="reranked">Reranker output, already ordered by descending score.</param>
    /// <param name="rows">The first-stage rows, indexed by <see cref="RerankerResult.OriginalIndex"/>.</param>
-   /// <param name="minScore">Inclusive floor; 0 keeps everything the reranker returned.</param>
-   /// <returns>The surviving rows in rerank order, and how many were dropped by the floor.</returns>
+   /// <param name="minScoreRatio">Fraction of the best score a result must reach; 0 keeps everything.</param>
+   /// <param name="minTopScore">If the best score is below this, the whole set is discarded.</param>
+   /// <returns>The surviving rows in rerank order, and how many were dropped by the gate.</returns>
    public static (List<(string FilePath, string Content, Dictionary<string, string> Meta)> Ordered, int Dropped)
       ApplyRelevanceGate(
          IReadOnlyList<RerankerResult> reranked,
          List<(string FilePath, string Content, Dictionary<string, string> Meta)> rows,
-         double minScore )
+         double minScoreRatio,
+         double minTopScore )
    {
       var ordered = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>();
       var dropped = 0;
 
-      foreach( var rerankResult in reranked )
-      {
-         // Out-of-range indices are skipped rather than counted as drops: they are a reranker contract
-         // violation, not a relevance decision, and must not be mistaken for "we filtered something".
-         if( rerankResult.OriginalIndex < 0 || rerankResult.OriginalIndex >= rows.Count )
-            continue;
+      // Valid results only — an out-of-range index is a reranker contract violation, not a relevance
+      // decision, so it must not influence the top score or be counted as a drop.
+      var valid = reranked
+         .Where( r => r.OriginalIndex >= 0 && r.OriginalIndex < rows.Count )
+         .ToList();
 
+      if( valid.Count == 0 )
+         return (ordered, dropped);
+
+      // The reranker contract says results arrive in descending score order, but Max() rather than
+      // First() means a misordered implementation degrades to a wrong ranking instead of a wrong filter.
+      var topScore = valid.Max( r => r.Score );
+      var floor = topScore * minScoreRatio;
+
+      // Nothing in the corpus answers this question: every candidate scored ~0, so there is no
+      // meaningful "best" to measure the others against and the honest answer is no results.
+      var degenerate = topScore < minTopScore;
+
+      foreach( var rerankResult in valid )
+      {
          var row = rows[rerankResult.OriginalIndex];
          row.Meta["rerank_score"] = rerankResult.Score.ToString( "0.#####" );
 
-         if( rerankResult.Score < minScore )
+         if( degenerate || rerankResult.Score < floor )
          {
             dropped++;
             continue;

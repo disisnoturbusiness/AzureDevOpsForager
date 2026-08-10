@@ -108,7 +108,7 @@ public class Server
    /// This exists because the values that decide whether search works at all arrive from a config.json
    /// that is deliberately not in source control, so reading the repo tells you nothing about what a
    /// given deployment is really running. A mis-set MaxVectorDistance silently empties the vector leg
-   /// and a mis-set MinRerankScore silently empties the result set — neither raises an error, so without
+   /// and a mis-set rerank gate silently empties the result set — neither raises an error, so without
    /// this line the only symptom is quietly worse results. One line at boot makes the effective
    /// configuration a matter of record instead of an archaeology exercise.
    /// </para>
@@ -122,7 +122,7 @@ public class Server
          : "none (full-text only)";
 
       var line = $"[CONFIG] EmbeddingDimension={Config.EmbeddingDimension} embedder={embedSource} " +
-                 $"MaxVectorDistance={Config.MaxVectorDistance} MinRerankScore={Config.MinRerankScore} " +
+                 $"MaxVectorDistance={Config.MaxVectorDistance} MinRerankScoreRatio={Config.MinRerankScoreRatio} MinRerankTopScore={Config.MinRerankTopScore} " +
                  $"reranker={( Config.RerankerEnabled ? "on" : "off" )} RerankerInputSize={Config.RerankerInputSize} " +
                  $"RRF(v/c/f)={Config.RrfVectorWeight}/{Config.RrfChunkFtsWeight}/{Config.RrfFileFtsWeight} " +
                  $"MinFtsRank={Config.MinFtsRank}";
