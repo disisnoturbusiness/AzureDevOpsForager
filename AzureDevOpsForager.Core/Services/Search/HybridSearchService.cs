@@ -314,11 +314,18 @@ public class HybridSearchService : IDisposable
             .DefaultIfEmpty( null )
             .Max();
 
-         Logger.Warn( $"All {dropped} result(s) filtered for \"{question}\". Top rerank score was " +
-                      $"{( observedTop.HasValue ? observedTop.Value.ToString( "G6" ) : "n/a" )}, " +
-                      $"MinRerankTopScore={Config.MinRerankTopScore:G6}, MinRerankScoreRatio={Config.MinRerankScoreRatio}. " +
-                      "If every query reports a top score below the guard, the gate is calibrated for a " +
-                      "different reranker — set MINRERANK_TOP_SCORE below the observed top score.", "Search" );
+         var diagnostic = $"[SEARCH] All {dropped} result(s) filtered for \"{question}\". Top rerank score was " +
+                          $"{( observedTop.HasValue ? observedTop.Value.ToString( "G6" ) : "n/a" )}, " +
+                          $"MinRerankTopScore={Config.MinRerankTopScore:G6}, MinRerankScoreRatio={Config.MinRerankScoreRatio}. " +
+                          "If every query reports a top score below the guard, the gate is calibrated for a " +
+                          "different reranker — set MINRERANK_TOP_SCORE below the observed top score.";
+
+         // Written to BOTH sinks deliberately. Logger only appends to a daily file on the host, which on a
+         // PaaS deployment is exactly where nobody looks; the console is what surfaces in the platform log
+         // stream. A diagnostic that exists but is invisible from the place you would go to read it is no
+         // better than not logging at all — which is the mistake that made this failure expensive.
+         Console.WriteLine( diagnostic );
+         Logger.Warn( diagnostic, "Search" );
       }
       else if( dropped > 0 )
          Logger.Info( $"Dropped {dropped} result(s) below {Config.MinRerankScoreRatio:P0} of the top rerank score for \"{question}\"; {ordered.Count} kept.", "Search" );
