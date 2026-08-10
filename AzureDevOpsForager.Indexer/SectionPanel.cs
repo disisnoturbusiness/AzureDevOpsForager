@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -23,7 +24,10 @@ internal sealed class SectionPanel : Panel
    private const int CornerRadius = 8;
 
    private string _headerText = string.Empty;
-   private Color _headerColor = SystemColors.Control;
+   /// <summary>Default header color, shared by the field initializer and the designer's Reset/ShouldSerialize hooks.</summary>
+   private static readonly Color DefaultHeaderColor = SystemColors.Control;
+
+   private Color _headerColor = DefaultHeaderColor;
 
    #endregion Data Members
 
@@ -45,11 +49,33 @@ internal sealed class SectionPanel : Panel
    /// <summary>The Y coordinate (panel-relative) at which the first content row should sit, below the header.</summary>
    public int ContentTop => Padding.Top;
 
-   /// <summary>Section title, drawn in the header strip.</summary>
+   /// <summary>
+   /// Section title, drawn in the header strip.
+   /// <para>
+   /// <see cref="DefaultValueAttribute"/> is required, not decorative: the .NET 10 WinForms analyzer
+   /// (WFO1000) treats a settable public property on a control with no declared serialization behaviour
+   /// as an error, because the designer cannot know whether to emit it into InitializeComponent. Declaring
+   /// the default makes that explicit and keeps generated designer code free of redundant assignments.
+   /// </para>
+   /// </summary>
+   [DefaultValue( "" )]
    public string HeaderText { get => _headerText; set { _headerText = value ?? string.Empty; Invalidate(); } }
 
-   /// <summary>Base color for this section's header (a light gradient is derived from it).</summary>
+   /// <summary>
+   /// Base color for this section's header (a light gradient is derived from it).
+   /// <para>
+   /// Colors cannot be expressed in a <see cref="DefaultValueAttribute"/> as a compile-time constant, so
+   /// this uses the ShouldSerialize/Reset pattern the designer looks for instead — the other half of what
+   /// WFO1000 accepts.
+   /// </para>
+   /// </summary>
    public Color HeaderColor { get => _headerColor; set { _headerColor = value; Invalidate(); } }
+
+   /// <summary>Designer hook: only persist <see cref="HeaderColor"/> when it differs from the default.</summary>
+   private bool ShouldSerializeHeaderColor() => _headerColor != DefaultHeaderColor;
+
+   /// <summary>Designer hook: restores <see cref="HeaderColor"/> to its default.</summary>
+   private void ResetHeaderColor() => HeaderColor = DefaultHeaderColor;
 
    #endregion Public Members
 
