@@ -239,7 +239,7 @@ public static class Config
    /// Set to 0 to disable and always return the full reranked list.
    /// </para>
    /// </summary>
-   public static double MinRerankScoreRatio { get; set; } = 0.1;
+   public static double MinRerankScoreRatio { get; set; } = ReadEnvDouble( "MINRERANK_SCORE_RATIO", 0.1 );
 
    /// <summary>
    /// Relevance gate, part two: if the BEST score in a result set is below this, the whole set is
@@ -254,7 +254,27 @@ public static class Config
    /// ratio's job, and conflating the two is what made the absolute floor fragile.
    /// </para>
    /// </summary>
-   public static double MinRerankTopScore { get; set; } = 0.000001;
+   public static double MinRerankTopScore { get; set; } = ReadEnvDouble( "MINRERANK_TOP_SCORE", 0.000001 );
+
+   /// <summary>
+   /// Reads a double from an environment variable, falling back to <paramref name="fallback"/> when it is
+   /// unset or unparseable. Invariant culture, so a value set on a host with a comma decimal separator
+   /// still reads correctly.
+   /// <para>
+   /// The two rerank-gate settings are env-readable specifically because they are the values most likely
+   /// to need changing on a live deployment, and the only ones that cannot be got right in advance: the
+   /// degenerate-top guard is expressed in the reranker's own score units, so it MUST be recalibrated
+   /// whenever the reranker changes. Leaving it as a code constant meant discovering a wrong value cost a
+   /// full build-and-deploy cycle per attempt — which is exactly how a reranker swap turned into an
+   /// afternoon. As an environment variable it is a setting change and a restart.
+   /// </para>
+   /// </summary>
+   private static double ReadEnvDouble( string name, double fallback )
+   {
+      var raw = System.Environment.GetEnvironmentVariable( name );
+      return double.TryParse( raw, System.Globalization.NumberStyles.Float,
+         System.Globalization.CultureInfo.InvariantCulture, out var parsed ) ? parsed : fallback;
+   }
 
    /// <summary>
    /// Path to the bge-reranker-v2-m3 cross-encoder ONNX model (its sentencepiece.bpe.model is expected

@@ -300,7 +300,27 @@ public class HybridSearchService : IDisposable
 
       var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScoreRatio, Config.MinRerankTopScore );
 
-      if( dropped > 0 )
+      if( dropped > 0 && ordered.Count == 0 )
+      {
+         // Everything was filtered. This is a legitimate answer for an unanswerable question, but it is
+         // ALSO what a mis-calibrated gate looks like — and the two are indistinguishable from outside.
+         // The deciding number is the top score the reranker actually produced, so log it: if it is far
+         // below MinRerankTopScore for every query, the guard is calibrated for a different model and
+         // this line says what to set MINRERANK_TOP_SCORE to. Without it, diagnosing a reranker swap
+         // means guessing thresholds one deploy at a time.
+         var observedTop = reranked
+            .Where( r => r.OriginalIndex >= 0 && r.OriginalIndex < rows.Count )
+            .Select( r => (double?)r.Score )
+            .DefaultIfEmpty( null )
+            .Max();
+
+         Logger.Warn( $"All {dropped} result(s) filtered for \"{question}\". Top rerank score was " +
+                      $"{( observedTop.HasValue ? observedTop.Value.ToString( "G6" ) : "n/a" )}, " +
+                      $"MinRerankTopScore={Config.MinRerankTopScore:G6}, MinRerankScoreRatio={Config.MinRerankScoreRatio}. " +
+                      "If every query reports a top score below the guard, the gate is calibrated for a " +
+                      "different reranker — set MINRERANK_TOP_SCORE below the observed top score.", "Search" );
+      }
+      else if( dropped > 0 )
          Logger.Info( $"Dropped {dropped} result(s) below {Config.MinRerankScoreRatio:P0} of the top rerank score for \"{question}\"; {ordered.Count} kept.", "Search" );
 
       // Deliberately NOT falling back to the unfiltered rows when everything is filtered out: an empty
