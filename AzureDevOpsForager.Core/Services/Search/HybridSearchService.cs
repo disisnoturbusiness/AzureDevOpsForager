@@ -298,35 +298,63 @@ public class HybridSearchService : IDisposable
       if( reranked == null || reranked.Count == 0 )
          return rows;
 
-      var ordered = new List<(string, string, Dictionary<string, string>)>();
-      var dropped = 0;
-      foreach( var rerankResult in reranked )
-         if( rerankResult.OriginalIndex >= 0 && rerankResult.OriginalIndex < rows.Count )
-         {
-            var row = rows[rerankResult.OriginalIndex];
-            row.Meta["rerank_score"] = rerankResult.Score.ToString( "0.#####" );
-
-            // Relevance gate. Retrieval always returns its nearest NResults candidates, so without this
-            // a question the corpus cannot answer still comes back with a full page of confident-looking
-            // results. The cross-encoder is the only signal that separates the two cleanly — vector
-            // distance does not, since off-topic and on-topic hits occupy the same distance band — so
-            // the floor is applied here rather than earlier in the pipeline.
-            if( rerankResult.Score < Config.MinRerankScore )
-            {
-               dropped++;
-               continue;
-            }
-
-            ordered.Add( row );
-         }
+      var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScore );
 
       if( dropped > 0 )
          Logger.Info( $"Dropped {dropped} result(s) below MinRerankScore={Config.MinRerankScore} for \"{question}\"; {ordered.Count} kept.", "Search" );
 
       // Deliberately NOT falling back to the unfiltered rows when everything is filtered out: an empty
       // result set is the correct, informative answer to a question this corpus cannot answer. The
-      // fallback below applies only when the reranker produced no usable indices at all.
+      // fallback applies only when the reranker produced no usable indices at all, i.e. nothing was
+      // scored and nothing was deliberately dropped.
       return ordered.Count > 0 || dropped > 0 ? ordered : rows;
+   }
+
+   /// <summary>
+   /// Reorders rows into the reranker's order, stamps each with its score, and drops anything scoring
+   /// below <paramref name="minScore"/>. Pure and static so the gate can be tested without a database,
+   /// an embedder or a live cross-encoder.
+   /// <para>
+   /// The gate exists because retrieval always returns its nearest N candidates, so without it a question
+   /// the corpus cannot answer comes back with a full page of confident-looking results. The cross-encoder
+   /// is the only signal that separates answerable from unanswerable cleanly — vector distance does not,
+   /// because off-topic and on-topic hits occupy the same distance band — which is why the filter lives
+   /// here rather than earlier in the pipeline.
+   /// </para>
+   /// </summary>
+   /// <param name="reranked">Reranker output, already ordered by descending score.</param>
+   /// <param name="rows">The first-stage rows, indexed by <see cref="RerankerResult.OriginalIndex"/>.</param>
+   /// <param name="minScore">Inclusive floor; 0 keeps everything the reranker returned.</param>
+   /// <returns>The surviving rows in rerank order, and how many were dropped by the floor.</returns>
+   public static (List<(string FilePath, string Content, Dictionary<string, string> Meta)> Ordered, int Dropped)
+      ApplyRelevanceGate(
+         IReadOnlyList<RerankerResult> reranked,
+         List<(string FilePath, string Content, Dictionary<string, string> Meta)> rows,
+         double minScore )
+   {
+      var ordered = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>();
+      var dropped = 0;
+
+      foreach( var rerankResult in reranked )
+      {
+         // Out-of-range indices are skipped rather than counted as drops: they are a reranker contract
+         // violation, not a relevance decision, and must not be mistaken for "we filtered something".
+         if( rerankResult.OriginalIndex < 0 || rerankResult.OriginalIndex >= rows.Count )
+            continue;
+
+         var row = rows[rerankResult.OriginalIndex];
+         row.Meta["rerank_score"] = rerankResult.Score.ToString( "0.#####" );
+
+         if( rerankResult.Score < minScore )
+         {
+            dropped++;
+            continue;
+         }
+
+         ordered.Add( row );
+      }
+
+      return (ordered, dropped);
    }
 
    /// <summary>
