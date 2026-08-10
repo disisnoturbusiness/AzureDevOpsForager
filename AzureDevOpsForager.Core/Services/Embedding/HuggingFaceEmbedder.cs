@@ -184,12 +184,27 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
       var array = JToken.Parse( body ) as JArray;
       if( array != null && array.Count > 0 && array[0] is JArray )
          array = (JArray)array[0];
+
+      // Throw rather than hand back a zero vector. An all-zero embedding is not a degraded result, it
+      // is a meaningless one: it survives NormalizeInPlace untouched (magnitude 0 short-circuits), then
+      // produces garbage cosine distances against every stored chunk, so the caller silently returns
+      // nonsense instead of reporting that the endpoint answered with something unparseable.
       if( array == null )
-         return new float[Config.EmbeddingDimension];
+         throw new InvalidOperationException(
+            $"Embedding endpoint returned a payload that is not a JSON array: {( body != null && body.Length > 200 ? body.Substring( 0, 200 ) + "..." : body )}" );
 
       var vector = new float[array.Count];
       for( int i = 0; i < array.Count; i++ )
          vector[i] = array[i].Value<float>();
+
+      // A dimension mismatch here means the configured model and EmbeddingDimension disagree. Caught at
+      // the source it is one clear message; left alone it surfaces much later as a CAST failure to
+      // VECTOR(n) inside the search proc, or worse, as a quietly empty vector leg.
+      if( vector.Length != Config.EmbeddingDimension )
+         throw new InvalidOperationException(
+            $"Embedding endpoint returned {vector.Length} dimensions but EmbeddingDimension is {Config.EmbeddingDimension}. " +
+            "Update EmbeddingDimension to match the model and run a full reindex." );
+
       return vector;
    }
 
