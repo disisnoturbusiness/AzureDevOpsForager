@@ -122,7 +122,7 @@ public class Server
          : "none (full-text only)";
 
       var line = $"[CONFIG] EmbeddingDimension={Config.EmbeddingDimension} embedder={embedSource} " +
-                 $"MaxVectorDistance={Config.MaxVectorDistance} MinRerankScoreRatio={Config.MinRerankScoreRatio} MinRerankTopScore={Config.MinRerankTopScore} " +
+                 $"MaxVectorDistance={Config.MaxVectorDistance} MinRerankScoreRatio={Config.MinRerankScoreRatio} MinRerankTopScore={Config.MinRerankTopScore} MinVectorOnly={Config.MinVectorOnlyRerankScore} " +
                  $"reranker={( Config.RerankerEnabled ? "on" : "off" )} rerankModel={Config.RerankerModelName} RerankerInputSize={Config.RerankerInputSize} " +
                  $"RRF(v/c/f)={Config.RrfVectorWeight}/{Config.RrfChunkFtsWeight}/{Config.RrfFileFtsWeight} " +
                  $"MinFtsRank={Config.MinFtsRank}";

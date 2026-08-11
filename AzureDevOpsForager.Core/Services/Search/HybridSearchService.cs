@@ -185,6 +185,35 @@ public class HybridSearchService : IDisposable
    }
 
    /// <summary>
+   /// True when a hit was corroborated by either full-text leg rather than reaching the results on vector
+   /// similarity alone. Reads the RRF components the procedure already returns, falling back to
+   /// match_source, which the procedure sets to "Vector" precisely when both full-text terms are zero.
+   /// </summary>
+   private static bool HasLexicalSupport( Dictionary<string, string> meta )
+   {
+      if( meta == null ) return true;   // unknown provenance: judge it like any other hit
+
+      if( TryScore( meta, "chunk_fts_rrf" ) > 0 || TryScore( meta, "file_fts_rrf" ) > 0 )
+         return true;
+
+      // If the RRF columns are absent (older payload), fall back to the label.
+      var hasRrfColumns = meta.ContainsKey( "chunk_fts_rrf" ) || meta.ContainsKey( "file_fts_rrf" );
+      if( hasRrfColumns ) return false;
+
+      return !string.Equals( meta.TryGetValue( "match_source", out var source ) ? source : null,
+                             "Vector", StringComparison.OrdinalIgnoreCase );
+   }
+
+   /// <summary>Parses a metadata value as a double, treating anything unparseable as zero.</summary>
+   private static double TryScore( Dictionary<string, string> meta, string key )
+   {
+      return meta.TryGetValue( key, out var raw )
+             && double.TryParse( raw, System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture, out var value )
+         ? value : 0;
+   }
+
+   /// <summary>
    /// True when an exception is the full-text filter daemon being unavailable rather than a real query
    /// fault. Matched on the message because the engine reports this through more than one error number and
    /// guessing at a specific code would silently fail to retry — <see cref="Describe"/> logs the actual
@@ -402,7 +431,7 @@ public class HybridSearchService : IDisposable
       if( reranked == null || reranked.Count == 0 )
          return rows;
 
-      var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScoreRatio, Config.MinRerankTopScore );
+      var (ordered, dropped) = ApplyRelevanceGate( reranked, rows, Config.MinRerankScoreRatio, Config.MinRerankTopScore, Config.MinVectorOnlyRerankScore );
 
       if( dropped > 0 && ordered.Count == 0 )
       {
@@ -457,13 +486,20 @@ public class HybridSearchService : IDisposable
    /// <param name="rows">The first-stage rows, indexed by <see cref="RerankerResult.OriginalIndex"/>.</param>
    /// <param name="minScoreRatio">Fraction of the best score a result must reach; 0 keeps everything.</param>
    /// <param name="minTopScore">If the best score is below this, the whole set is discarded.</param>
+   /// <param name="minVectorOnlyScore">
+   /// Absolute floor applied only to hits with no full-text corroboration; 0 disables the distinction.
+   /// Unlike the other two this one is absolute, which is normally a model-calibration trap — it is
+   /// acceptable here because it fires only on the vector-only subset, and misjudging it costs those
+   /// results alone rather than emptying every search.
+   /// </param>
    /// <returns>The surviving rows in rerank order, and how many were dropped by the gate.</returns>
    public static (List<(string FilePath, string Content, Dictionary<string, string> Meta)> Ordered, int Dropped)
       ApplyRelevanceGate(
          IReadOnlyList<RerankerResult> reranked,
          List<(string FilePath, string Content, Dictionary<string, string> Meta)> rows,
          double minScoreRatio,
-         double minTopScore )
+         double minTopScore,
+         double minVectorOnlyScore = 0 )
    {
       var ordered = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>();
       var dropped = 0;
@@ -491,7 +527,17 @@ public class HybridSearchService : IDisposable
          var row = rows[rerankResult.OriginalIndex];
          row.Meta["rerank_score"] = rerankResult.Score.ToString( "0.#####" );
 
-         if( degenerate || rerankResult.Score < floor )
+         // A vector-only hit reached the result set on embedding proximity alone, with neither full-text
+         // leg matching it. Vector search always returns its nearest neighbours no matter how distant, so
+         // for a term the corpus has never seen that is the entire result set — five confident-looking
+         // files, none containing the word. Requiring a much higher rerank score from these, and only
+         // these, removes that without touching genuine semantic matches, which score an order of
+         // magnitude higher.
+         var effectiveFloor = HasLexicalSupport( row.Meta )
+            ? floor
+            : Math.Max( floor, minVectorOnlyScore );
+
+         if( degenerate || rerankResult.Score < effectiveFloor )
          {
             dropped++;
             continue;
