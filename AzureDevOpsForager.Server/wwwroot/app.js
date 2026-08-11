@@ -398,7 +398,8 @@
       thinking.remove();
       const answer = data.answer ?? data.Answer ?? "(no answer returned)";
       const sources = data.sources ?? data.Sources ?? [];
-      appendAnswer(answer, sources, q);
+      const results = data.results ?? data.Results ?? null;
+      appendAnswer(answer, sources, q, results);
     } catch (err) {
       thinking.remove();
       appendAnswerError("Couldn't reach the chat service. " + (err.message || ""));
@@ -438,19 +439,41 @@
     scrollChat();
   }
 
-  function appendAnswer(answer, sources, question) {
+  function appendAnswer(answer, sources, question, results) {
     const el = document.createElement("div");
     el.className = "msg msg-a";
 
-    let html = `<div class="answer-body">${renderMarkdown(answer)}</div>`;
+    el.innerHTML = `<div class="answer-body">${renderMarkdown(answer)}</div>`;
 
-    const srcList = normalizeSources(sources);
-    if (srcList.length) {
-      html += `<div class="sources"><div class="sources-title">Sources</div>` +
-        srcList.map((s) => `<span class="source-chip">${esc(s)}</span>`).join("") + `</div>`;
+    // Sources render as the SAME cards the search results use — one per chunk, expandable, with the
+    // code, the match source and the scores. A flat list of file-path chips loses everything that
+    // makes a hit judgeable, and collapses two chunks from one file into a single entry. The chunks
+    // are already in the response; there is nothing to link out to, so nothing should.
+    const ids = (results && results.ids && results.ids[0]) || [];
+    const docs = (results && results.documents && results.documents[0]) || [];
+    const metas = (results && results.metadatas && results.metadatas[0]) || [];
+
+    if (ids.length) {
+      const wrap = document.createElement("div");
+      wrap.className = "sources";
+      wrap.innerHTML = `<div class="sources-title">Sources</div>`;
+      const cards = document.createElement("div");
+      cards.className = "source-results";
+      ids.forEach((path, i) => cards.appendChild(buildResult(i, path, docs[i] || "", metas[i] || {})));
+      wrap.appendChild(cards);
+      el.appendChild(wrap);
+    } else {
+      // Fallback for a server that still returns only paths (or a chat error response with none).
+      const srcList = normalizeSources(sources);
+      if (srcList.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "sources";
+        wrap.innerHTML = `<div class="sources-title">Sources</div>` +
+          srcList.map((s) => `<span class="source-chip">${esc(s)}</span>`).join("");
+        el.appendChild(wrap);
+      }
     }
 
-    el.innerHTML = html;
     el.appendChild(buildFeedback(question, answer));
     chatLog.appendChild(el);
     scrollChat();

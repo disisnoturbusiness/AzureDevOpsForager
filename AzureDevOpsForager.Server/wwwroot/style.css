@@ -610,6 +610,18 @@ body::after {
   font-weight: 600;
   margin-bottom: 0.5rem;
 }
+/* Source hits inside an answer are the same cards the search results use, so they stack with the
+   same spacing rather than sitting flush against each other. Kept slightly inset so they read as
+   belonging to the answer above rather than as a separate result list. */
+.source-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.source-results .result {
+  animation-duration: 0.25s;
+}
+
 .source-chip {
   display: inline-flex;
   align-items: center;

@@ -581,7 +581,24 @@ public class Server
             }
 
          var answer = await llmProvider.AskAsync( request.Question, contextBuilder.ToString() );
-         return Results.Json( new { answer, sources } );
+
+         // Return the retrieved hits in full, not just their file paths. The client renders an answer's
+         // sources with the same card component the search results use — chunk name, type, match source,
+         // scores, line range and the code itself — and none of that is reconstructable from a path.
+         // "sources" is retained for older clients and because it is the deduped file-level view; the
+         // chunk-level detail lives in "results", where two chunks from one file stay separate rather
+         // than collapsing into a single entry.
+         return Results.Json( new
+         {
+            answer,
+            sources,
+            results = new
+            {
+               ids = searchResults.Ids,
+               documents = searchResults.Documents,
+               metadatas = searchResults.Metadatas
+            }
+         } );
       } );
 
       // Chat feedback (thumbs up/down) appended to a local log.
