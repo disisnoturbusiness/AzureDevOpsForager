@@ -675,7 +675,7 @@ Endpoints:
   GET  /health             - Health check
   GET  /collections        - Index stats
 
-Backend: SQL Server 2025 / Azure SQL native VECTOR + DiskANN, RRF fusion, Qwen3-Reranker-4B cross-encoder rerank.
+Backend: SQL Server 2025 / Azure SQL native VECTOR + DiskANN, RRF fusion, Qwen3-Reranker-0.6B cross-encoder rerank.
 Embeddings: bge-code-v1 (code-specialized, 1536-dim) via Hugging Face endpoint, or local ONNX e5-large-v2 (1024-dim).
 Status: Running
 ", "text/plain" );

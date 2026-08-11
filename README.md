@@ -11,7 +11,7 @@ and (optionally) explained by an LLM that only ever sees the snippets the server
 
 Embedding and reranking each run **either in-process via local ONNX or remotely via a Hugging Face Inference
 Endpoint** — the same pipeline either way. The hosted path runs code-specialized models (`bge-code-v1`
-embeddings + `Qwen3-Reranker-4B`, chosen for better C# retrieval); the local path runs lightweight ONNX
+embeddings + `Qwen3-Reranker-0.6B`, chosen for better C# retrieval); the local path runs lightweight ONNX
 models (`e5-large-v2` + `bge-reranker-v2-m3`) with zero GPU and zero API cost. Run it zero-local-ONNX
 against Hugging Face, fully offline on local models, or try the hosted demo.
 
@@ -29,11 +29,17 @@ lives **only on the server** — the desktop and web clients are thin clients th
   — dense vector similarity, chunk-level full-text, and file-level full-text — using Reciprocal Rank
   Fusion, so exact-name matches and semantic matches both surface.
 - **Cross-encoder reranking.** The RRF candidate pool is re-scored by a cross-encoder for a precision
-  boost over bi-encoder-only ranking. The hosted demo uses `Qwen3-Reranker-4B` (81.20 on MTEB-Code, where
+  boost over bi-encoder-only ranking. The hosted demo uses `Qwen3-Reranker-0.6B` (73.42 on MTEB-Code, where
   the general-purpose `bge-reranker-v2-m3` scores 41.38), deployed as the sequence-classification
-  conversion `tomaarsen/Qwen3-Reranker-4B-seq-cls` on vLLM and called via a Jina-style `/rerank` API; the
+  conversion `tomaarsen/Qwen3-Reranker-0.6B-seq-cls` on vLLM and called via a Jina-style `/rerank` API; the
   local path runs `bge-reranker-v2-m3` via ONNX. Both sit behind one `IReranker` interface and are
   fail-soft — if the reranker is unavailable the results simply fall back to their RRF order.
+- **It returns nothing when it should.** Retrieval always has a nearest neighbour, so a search for a term
+  the codebase has never contained still yields a full page of confident-looking files. The reranker's
+  scores drive a relevance gate that drops those, and the last case it can't judge on score alone —
+  `garbage` outscored a query that was answered correctly — is settled on provenance: a hit with no
+  full-text corroboration has to clear a much higher bar than one a keyword leg also matched. Asking the
+  demo about Kubernetes gets you an empty result set, which is the honest answer.
 - **Pluggable embeddings — local or hosted.** Embedding sits behind an `IEmbedder` interface with two
   implementations: **local ONNX Runtime** (`EmbeddingService` — `e5-large-v2`, 1024-dim, fully offline,
   no API cost) and a **Hugging Face Inference Endpoint** (`HuggingFaceEmbedder` — `BAAI/bge-code-v1`, a
@@ -78,8 +84,8 @@ lives **only on the server** — the desktop and web clients are thin clients th
 | Project | Target | Role |
 |---------|--------|------|
 | `AzureDevOpsForager.Core` | netstandard2.0 | Embeddings, search, reranking, chat provider, sources, schema/DDL, config |
-| `AzureDevOpsForager.Server` | net8.0 | ASP.NET Core server — `/query`, `/chat`, `/systems`, `/health`, web UI; holds the server secrets (Groq key, HF token); reads SQL |
-| `AzureDevOpsForager.Indexer` | net8.0-windows | Single-window WinForms indexer (also runnable headless) — pick a source + target DB, build the index |
+| `AzureDevOpsForager.Server` | net10.0 | ASP.NET Core server — `/query`, `/chat`, `/systems`, `/health`, web UI; holds the server secrets (Groq key, HF token); reads SQL |
+| `AzureDevOpsForager.Indexer` | net10.0-windows | Single-window WinForms indexer (also runnable headless) — pick a source + target DB, build the index |
 | `AzureDevOpsForager.WinForms` | net48 | Desktop chat viewer — a thin client of the server's `/chat` |
 | `AzureDevOpsForager.Shared` | net48 | Shared WinForms UI base + utilities |
 
@@ -94,7 +100,7 @@ lives **only on the server** — the desktop and web clients are thin clients th
    - `FREETEXT` over chunk content,
    - `FREETEXT` over file content,
    and fuses them with **Reciprocal Rank Fusion** (`weight × 1/(k + rank)` with k=60, default weights 60/30/30).
-3. **Over-fetch** the top RRF candidates and **rerank** them with a cross-encoder (`Qwen3-Reranker-4B`
+3. **Over-fetch** the top RRF candidates and **rerank** them with a cross-encoder (`Qwen3-Reranker-0.6B`
    hosted, `bge-reranker-v2-m3` local; each `(query, chunk)` pair scored directly), then keep the top *N*.
 4. If embeddings are unavailable, the pipeline **degrades gracefully** to full-text-only search.
 
@@ -115,7 +121,7 @@ browser, and ask a question. No database, no models, no key required.
 
 **Prerequisites**
 - SQL Server 2025 (or Azure SQL) with the vector preview enabled and Full-Text Search installed.
-- .NET 8 SDK (for the server + indexer) and .NET Framework 4.8 (for the desktop viewer).
+- .NET 10 SDK (for the server + indexer) and .NET Framework 4.8 (for the desktop viewer).
 - Embeddings + reranking can run several ways (see [Embedding & reranking](#embedding--reranking)):
   the two local ONNX models, **or** Hugging Face endpoint URLs + an `HF_TOKEN` (no local models).
 
@@ -176,9 +182,9 @@ Endpoint**, behind the `IEmbedder` and `IReranker` interfaces — and the two pa
 
 - **Hosted (how the demo runs)** — `BAAI/bge-code-v1` embeddings (code-specialized, Qwen2.5-Coder-1.5B
   backbone, 1536-dim, 32k context, Apache 2.0; state-of-the-art on the CoIR code-retrieval benchmark at
-  ~81.8), served on a Hugging Face Inference Endpoint via TEI, plus `Qwen3-Reranker-4B` (Apache 2.0;
-  81.20 on MTEB-Code, vs 41.38 for `bge-reranker-v2-m3`), deployed as the sequence-classification
-  conversion `tomaarsen/Qwen3-Reranker-4B-seq-cls` on a vLLM container and called via the Jina-style
+  ~81.8), served on a Hugging Face Inference Endpoint via TEI, plus `Qwen3-Reranker-0.6B` (Apache 2.0;
+  73.42 on MTEB-Code, vs 41.38 for `bge-reranker-v2-m3`), deployed as the sequence-classification
+  conversion `tomaarsen/Qwen3-Reranker-0.6B-seq-cls` on a vLLM container and called via the Jina-style
   `/rerank` API. Both were chosen because they are code-specialized — a measurable retrieval-quality
   upgrade for C# over the earlier general-text models.
 - **Local (lightweight, offline)** — `e5-large-v2` embeddings (1024-dim) + the `bge-reranker-v2-m3`
@@ -255,9 +261,10 @@ working default; you override only what you need.
 | `HuggingFaceEmbedUrl` / `HuggingFaceRerankUrl` | Hugging Face Inference Endpoint URLs for embedding + reranking (not secret; leave blank to use local ONNX) |
 | `EmbeddingServiceUrl` | Hosted Server `/embed` service the Indexer uses to embed remotely when no local model and no HF endpoint is configured (default: the demo server) |
 | `RerankerModelPath` / `RerankerEnabled` / `RerankerInputSize` | Local cross-encoder model path, on/off, candidate-pool size |
-| `RerankerInstruction` / `RerankerModelName` | Hosted (Qwen3) rerank only: task instruction baked into each scoring prompt, and the model name sent to the `/rerank` endpoint (default `tomaarsen/Qwen3-Reranker-4B-seq-cls`) |
+| `RerankerInstruction` / `RerankerModelName` | Hosted (Qwen3) rerank only: task instruction baked into each scoring prompt, and the model name sent to the `/rerank` endpoint (default `tomaarsen/Qwen3-Reranker-0.6B-seq-cls`) |
 | `RrfVectorWeight` / `RrfChunkFtsWeight` / `RrfFileFtsWeight` | RRF fusion weights |
 | `MinFtsRank` / `MaxVectorDistance` | Candidate-admission thresholds |
+| `MinRerankScoreRatio` / `MinRerankTopScore` / `MinVectorOnlyRerankScore` | Relevance gate — how far below the top hit a result may score, when to discard the whole set, and the higher bar a result with no full-text corroboration must clear. Also env-readable (`MINRERANK_SCORE_RATIO`, `MINRERANK_TOP_SCORE`, `MINVECTORONLY_RERANK_SCORE`) |
 | `SourceType` | `tfvc`, `git`, or `github` |
 | `GitHubRepoUrl` / `GitBranch` / `GitHubToken` | GitHub source settings |
 | `AzureUrl` / `AzureProject` / `AzureTfvcRoot` / `GitRepository` / `AzurePAT` | Azure DevOps source settings |
@@ -272,9 +279,9 @@ a shipped artifact or sent to a client.
 
 ## Tech stack
 
-.NET 8 / .NET Standard 2.0 / .NET Framework 4.8 · ASP.NET Core · WinForms · SQL Server 2025
+.NET 10 / .NET Standard 2.0 / .NET Framework 4.8 · ASP.NET Core · WinForms · SQL Server 2025
 (`VECTOR`, `VECTOR_SEARCH`, DiskANN, Full-Text Search) · embeddings + reranking (`bge-code-v1` +
-`Qwen3-Reranker-4B` via Hugging Face Inference Endpoints, **or** `e5-large-v2` + `bge-reranker-v2-m3`
+`Qwen3-Reranker-0.6B` via Hugging Face Inference Endpoints, **or** `e5-large-v2` + `bge-reranker-v2-m3`
 via local ONNX Runtime) · Roslyn · Groq (llama-3.3-70b).
 
 ## Documentation

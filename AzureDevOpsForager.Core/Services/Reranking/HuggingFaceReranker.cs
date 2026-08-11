@@ -10,8 +10,8 @@ using Newtonsoft.Json.Linq;
 
 namespace AzureDevOpsForager.Core.Services.Reranking;
 /// <summary>
-/// Remote <see cref="IReranker"/> backed by a Hugging Face Inference Endpoint serving Qwen3-Reranker-4B in
-/// its sequence-classification form (tomaarsen/Qwen3-Reranker-4B-seq-cls) on a vLLM container. It POSTs a
+/// Remote <see cref="IReranker"/> backed by a Hugging Face Inference Endpoint serving Qwen3-Reranker-0.6B in
+/// its sequence-classification form (tomaarsen/Qwen3-Reranker-0.6B-seq-cls) on a vLLM container. It POSTs a
 /// Jina-style {"model","query","documents"} request to the endpoint's /rerank route and reads back the
 /// scored results, mapping each returned index back to the candidate's OriginalIndex.
 ///

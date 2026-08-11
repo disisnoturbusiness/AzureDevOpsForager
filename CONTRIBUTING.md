@@ -16,7 +16,7 @@ At minimum, before opening a PR:
 ```bash
 dotnet build AzureDevOpsForager.Core
 dotnet build AzureDevOpsForager.Server
-dotnet build AzureDevOpsForager.Indexer     # net8.0-windows — build on Windows
+dotnet build AzureDevOpsForager.Indexer     # net10.0-windows — build on Windows
 dotnet build AzureDevOpsForager.WinForms    # net48 — build on Windows
 dotnet test  AzureDevOpsForager.Tests
 ```
