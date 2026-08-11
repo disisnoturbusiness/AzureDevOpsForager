@@ -580,7 +580,22 @@ public class Server
                if( !sources.Contains( ids[i] ) ) sources.Add( ids[i] );
             }
 
-         var answer = await llmProvider.AskAsync( request.Question, contextBuilder.ToString() );
+         // No retrieved code means nothing to ground an answer in, and a model handed an empty context
+         // answers from its training weights instead of saying so — see GroundingGuard for why that is the
+         // one failure this endpoint must not have. Short-circuit before the completion rather than after.
+         var context = contextBuilder.ToString();
+         if( !GroundingGuard.HasGrounding( context ) )
+         {
+            Console.WriteLine( $"[CHAT] No grounding for \"{request.Question}\" — answering without a model call." );
+            return Results.Json( new
+            {
+               answer = GroundingGuard.NoGroundingAnswer,
+               sources,
+               results = new { ids = searchResults.Ids, documents = searchResults.Documents, metadatas = searchResults.Metadatas }
+            } );
+         }
+
+         var answer = await llmProvider.AskAsync( request.Question, context );
 
          // Return the retrieved hits in full, not just their file paths. The client renders an answer's
          // sources with the same card component the search results use — chunk name, type, match source,
