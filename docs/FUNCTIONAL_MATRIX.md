@@ -32,7 +32,7 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 
 | Capability | Implementation | Verified by |
 |------------|----------------|-------------|
-| Hosted cross-encoder rerank — `Qwen3-Reranker-4B` (seq-cls, vLLM `/rerank`, Qwen3 chat-template wrapping client-side) | `Core/Services/Reranking/HuggingFaceReranker.cs` | Demo *(the hosted demo is HF-backed)* |
+| Hosted cross-encoder rerank — `Qwen3-Reranker-0.6B` (seq-cls, vLLM `/rerank`, Qwen3 chat-template wrapping client-side) | `Core/Services/Reranking/HuggingFaceReranker.cs` | Demo *(the hosted demo is HF-backed)* |
 | Local ONNX cross-encoder rerank — `bge-reranker-v2-m3` (query,chunk) scoring | `Core/Services/Reranking/BgeReranker.cs` | Manual |
 | Fail-soft: fall back to RRF order if reranker errors/unavailable | `HybridSearchService.ApplyRerankAsync` | Demo |
 | Toggle reranking on/off (`RerankerEnabled`) | `Core/Config.cs` | **Unit** — `ConfigTests` |

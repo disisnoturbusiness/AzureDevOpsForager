@@ -4,7 +4,7 @@
 
 Azure DevOps Forager is a self-hostable semantic + lexical code-search tool. It indexes a codebase (Azure DevOps TFVC, Azure DevOps Git, or GitHub) into **SQL Server 2025's native `VECTOR` type**, then answers questions with a **hybrid retrieval pipeline** — dense vector search fused with two full-text signals via Reciprocal Rank Fusion (RRF), re-ranked by a cross-encoder, and optionally explained by a grounded LLM (Groq). No code leaves your infrastructure except the question plus the snippets the server retrieves, and the LLM key lives only on the server.
 
-Embedding and reranking each run **in-process via local ONNX** *or* **remotely against a Hugging Face (HF) Inference Endpoint** — and the two paths run different models. The HF path (how the hosted demo runs) uses code-specialized models: `BAAI/bge-code-v1` embeddings (1536-dim) and `Qwen3-Reranker-4B`. The local path uses the lightweight pair: `e5-large-v2` (1024-dim) and `bge-reranker-v2-m3`, in-process with zero GPU and zero API cost. These sit behind the `IEmbedder` and `IReranker` interfaces, so the choice is a configuration/DI concern, not a code one — a recipient can run zero-local-ONNX (point at HF), fully local (bundled ONNX models), or use the hosted demo. Local ONNX remains the offline/no-account default and works exactly as before; note the two model families produce incompatible vectors, so switching embedding models requires a full reindex (§4).
+Embedding and reranking each run **in-process via local ONNX** *or* **remotely against a Hugging Face (HF) Inference Endpoint** — and the two paths run different models. The HF path (how the hosted demo runs) uses code-specialized models: `BAAI/bge-code-v1` embeddings (1536-dim) and `Qwen3-Reranker-0.6B`. The local path uses the lightweight pair: `e5-large-v2` (1024-dim) and `bge-reranker-v2-m3`, in-process with zero GPU and zero API cost. These sit behind the `IEmbedder` and `IReranker` interfaces, so the choice is a configuration/DI concern, not a code one — a recipient can run zero-local-ONNX (point at HF), fully local (bundled ONNX models), or use the hosted demo. Local ONNX remains the offline/no-account default and works exactly as before; note the two model families produce incompatible vectors, so switching embedding models requires a full reindex (§4).
 
 > For **end-user** instructions — running a search, the Indexer UI walkthrough, troubleshooting — see [USER_GUIDE.md](USER_GUIDE.md). This guide is the internals.
 
@@ -26,16 +26,16 @@ Embedding and reranking each run **in-process via local ONNX** *or* **remotely a
 
 ## 1. Architecture
 
-The solution is six projects. The unusual multi-targeting is intentional: `Core` is `netstandard2.0` so it can be shared by every consumer, from a .NET Framework 4.8 desktop app to a .NET 8 Linux server.
+The solution is six projects. The unusual multi-targeting is intentional: `Core` is `netstandard2.0` so it can be shared by every consumer, from a .NET Framework 4.8 desktop app to a .NET 10 Linux server.
 
 | Project | Target framework | Role |
 |---------|------------------|------|
 | `AzureDevOpsForager.Core` | `netstandard2.0` | Domain + all services: embeddings, search, reranking, chat providers, source adapters, integration clients, schema/DDL, config, utilities. **No project references** — depends only on NuGet. |
-| `AzureDevOpsForager.Indexer` | `net8.0-windows` (WinForms) | Single-window index builder. Picks a source + destination DB, Roslyn-chunks, embeds, and writes the vector index. Owns the Roslyn engine. |
-| `AzureDevOpsForager.Server` | `net8.0` (`Microsoft.NET.Sdk.Web`) | ASP.NET Core minimal-API host + static web UI (`wwwroot`). Serves `/query`, `/chat`, `/embed`, `/systems`, `/health`, etc. Holds the Groq key. Reads SQL. Runs as console **or** Windows Service. |
+| `AzureDevOpsForager.Indexer` | `net10.0-windows` (WinForms) | Single-window index builder. Picks a source + destination DB, Roslyn-chunks, embeds, and writes the vector index. Owns the Roslyn engine. |
+| `AzureDevOpsForager.Server` | `net10.0` (`Microsoft.NET.Sdk.Web`) | ASP.NET Core minimal-API host + static web UI (`wwwroot`). Serves `/query`, `/chat`, `/embed`, `/systems`, `/health`, etc. Holds the Groq key. Reads SQL. Runs as console **or** Windows Service. |
 | `AzureDevOpsForager.WinForms` | `net48` | Desktop chat viewer — a thin HTTP client of the server's `/chat`. |
 | `AzureDevOpsForager.Shared` | `net48` | Shared WinForms UI base (`BaseMainForm`) + utilities used by the desktop viewer. |
-| `AzureDevOpsForager.Tests` | `net8.0-windows` | xUnit test project (references `Core` + `Indexer`). |
+| `AzureDevOpsForager.Tests` | `net10.0-windows` | xUnit test project (references `Core` + `Indexer`). |
 
 ### How they relate
 
@@ -63,7 +63,7 @@ The solution is six projects. The unusual multi-targeting is intentional: `Core`
 ### Key runtime contracts between projects
 
 - The **embedding dimension is config-driven**: `Config.EmbeddingDimension` (default **1536**, matching the hosted `bge-code-v1`; set **1024** for the local `e5-large-v2`) flows into the `VECTOR(n)` column, the DiskANN index, and the `dbo.SearchCode` proc. The model, the dimension, and the stored vectors must all agree — **changing the embedding model requires a full reindex** (the staging + atomic-swap reindex, §2.4, does this with zero downtime).
-- **Embedding + reranking are pluggable via `IEmbedder` and `IReranker`.** Each has a local-ONNX implementation (`EmbeddingService` — `e5-large-v2`; `BgeReranker` — `bge-reranker-v2-m3`) and a remote HF implementation (`HuggingFaceEmbedder` — `bge-code-v1`; `HuggingFaceReranker` — `Qwen3-Reranker-4B`). The local and remote embedders run **different models with different dimensions**, so their vectors are *not* interchangeable — an index is searchable only with the model that built it.
+- **Embedding + reranking are pluggable via `IEmbedder` and `IReranker`.** Each has a local-ONNX implementation (`EmbeddingService` — `e5-large-v2`; `BgeReranker` — `bge-reranker-v2-m3`) and a remote HF implementation (`HuggingFaceEmbedder` — `bge-code-v1`; `HuggingFaceReranker` — `Qwen3-Reranker-0.6B`). The local and remote embedders run **different models with different dimensions**, so their vectors are *not* interchangeable — an index is searchable only with the model that built it.
 - The **Indexer and Server can share an embedding source.** The Indexer can embed locally (its own ONNX model), remotely via a HF endpoint (`HuggingFaceEmbedder`), *or* by calling the Server's `/embed` endpoint. The Server exposes `/embed` precisely so a self-hoster without a local model can still build an index.
 - **`SchemaInitializer` is the shared schema authority.** The Indexer calls it to create/stage/swap; the Server's search proc is created by it. Nothing else emits DDL.
 
@@ -194,7 +194,7 @@ dimension by `SchemaInitializer`). Every returned row becomes a `(FilePath, Cont
 
 `SearchViaProcAsync` decides `doRerank = _reranker != null && Config.RerankerEnabled`. When on, it **over-fetches** a wider pool (`fetchN = max(NResults, Config.RerankerInputSize)`, default 30), reranks, then trims to `NResults`.
 
-`ApplyRerankAsync` builds `RerankerCandidate` objects (each carries its original index + the chunk preview) and calls `IReranker.RerankAsync`. Two implementations satisfy that interface — the one that is wired in depends on config (see §5.2 / §7.3): the local ONNX `BgeReranker` scores with `bge-reranker-v2-m3`, the remote `HuggingFaceReranker` with `Qwen3-Reranker-4B`. Both are **fail-soft** (any failure returns the candidates in original order, `FallbackOriginalOrder`; only genuine cancellation propagates).
+`ApplyRerankAsync` builds `RerankerCandidate` objects (each carries its original index + the chunk preview) and calls `IReranker.RerankAsync`. Two implementations satisfy that interface — the one that is wired in depends on config (see §5.2 / §7.3): the local ONNX `BgeReranker` scores with `bge-reranker-v2-m3`, the remote `HuggingFaceReranker` with `Qwen3-Reranker-0.6B`. Both are **fail-soft** (any failure returns the candidates in original order, `FallbackOriginalOrder`; only genuine cancellation propagates).
 
 **Local ONNX — `BgeReranker`.** Scores each `(query, chunk)` pair jointly with `bge-reranker-v2-m3` (XLM-RoBERTa cross-encoder) in-process:
 
@@ -203,7 +203,23 @@ dimension by `SchemaInitializer`). Every returned row becomes a `(FilePath, Cont
 - Truncates to `MaxSequenceLength = 512` (document trimmed first).
 - A failed model init is retried no more often than every 5 minutes.
 
-**Remote HF — `HuggingFaceReranker`.** The endpoint serves **`Qwen3-Reranker-4B`** in its sequence-classification form (`tomaarsen/Qwen3-Reranker-4B-seq-cls`) on a vLLM container. The client POSTs a Jina-style `{ "model", "query", "documents", "top_n" }` request to **`POST <url>/rerank`** (the base URL from `Config.HuggingFaceRerankUrl` with `/rerank` appended) under a bearer token. Qwen3-Reranker scores through its chat template, and that wrapping is applied **client-side**: the query carries the template prefix plus `<Instruct>:` (the task text from `Config.RerankerInstruction`) and `<Query>:` markers, and each document carries the `<Document>:` marker plus the template suffix; `model` comes from `Config.RerankerModelName`. The parser accepts both the vLLM/Jina response shape (`{"results":[{index,relevance_score}]}`) and the older TEI shape (`[{index,score}]`), mapping each returned `index` (position in `documents`) back to the candidate's `OriginalIndex`, then ordering by descending score and trimming to `topK`. No reranker model is loaded in-process. Same fail-soft contract: any HTTP/parse failure — or an empty scored list — degrades to the original order. Scale-to-zero endpoints are covered by the warm-up retry (see §4.3).
+**Remote HF — `HuggingFaceReranker`.** The endpoint serves **`Qwen3-Reranker-0.6B`** in its sequence-classification form (`tomaarsen/Qwen3-Reranker-0.6B-seq-cls`) on a vLLM container. The client POSTs a Jina-style `{ "model", "query", "documents", "top_n" }` request to **`POST <url>/rerank`** (the base URL from `Config.HuggingFaceRerankUrl` with `/rerank` appended) under a bearer token. Qwen3-Reranker scores through its chat template, and that wrapping is applied **client-side**: the query carries the template prefix plus `<Instruct>:` (the task text from `Config.RerankerInstruction`) and `<Query>:` markers, and each document carries the `<Document>:` marker plus the template suffix; `model` comes from `Config.RerankerModelName`. The parser accepts both the vLLM/Jina response shape (`{"results":[{index,relevance_score}]}`) and the older TEI shape (`[{index,score}]`), mapping each returned `index` (position in `documents`) back to the candidate's `OriginalIndex`, then ordering by descending score and trimming to `topK`. No reranker model is loaded in-process. Same fail-soft contract: any HTTP/parse failure — or an empty scored list — degrades to the original order. Scale-to-zero endpoints are covered by the warm-up retry (see §4.3).
+
+### 3.2.1 The relevance gate — returning nothing on purpose
+
+Reranking also decides **how many** results come back. `HybridSearchService.ApplyRelevanceGate` (pure, static, unit-tested without SQL or a live cross-encoder) drops candidates the reranker scored too low, so a question this corpus cannot answer comes back empty instead of with a full page of nearest-neighbour noise. Retrieval on its own can never do this: vector search always returns its N closest chunks however distant they are, and the RRF score is a rank-fusion artifact, not a relevance measure. Three settings, in increasing bluntness:
+
+| Setting | Kind | What it decides |
+|---|---|---|
+| `MinRerankScoreRatio` (0.1) | **relative** | A hit must score at least this fraction of the best score in its own result set. |
+| `MinRerankTopScore` (1e-6) | absolute, tiny | If even the best score is ~0, discard the whole set — the ratio alone cannot tell "all equally good" from "all equally worthless". |
+| `MinVectorOnlyRerankScore` (0.05) | absolute, per-subset | A hit with **no full-text corroboration** (both RRF legs zero, `MatchSource='Vector'`) must clear this on its own. |
+
+`MinRerankScoreRatio` is deliberately relative: an absolute floor encodes one model's score calibration, so it silently stops working the moment the reranker is swapped. That is not hypothetical — a floor tuned on `Qwen3-Reranker-4B` returned zero results for every query once the endpoint was pointed at the 0.6B, with nothing logged, because the smaller model scores on a different scale.
+
+`MinVectorOnlyRerankScore` is the one place that rule is knowingly broken, because score alone cannot separate the last failure mode: searching a word the codebase has never contained (`garbage`, `zebra`, `kubernetes`) still returned five files, none containing the term. Those scored *higher* (top 0.0089) than a query that was answered correctly (`how many bits in a byte`, top 0.0033), so no flat threshold rejects one without the other. Provenance separates them cleanly — every junk query was vector-only across the board, and every genuine one produced at least one `Hybrid`/`FullText` hit — so the higher bar applies only to the uncorroborated subset, where a mis-set value costs those hits rather than emptying search. All three are env-readable (`MINRERANK_SCORE_RATIO`, `MINRERANK_TOP_SCORE`, `MINVECTORONLY_RERANK_SCORE`) and echoed in the `[CONFIG]` line at boot, so a deployment's effective gate is on the record; re-measure by setting the last to `0` and reading `rerank_score` + `match_source` off the returned metadata.
+
+Both reranker implementations fall back to **high descending pseudo-scores**, never zeros, precisely so an endpoint outage degrades to RRF order instead of tripping these gates and emptying every search.
 
 ### 3.3 FTS-only fallback
 
@@ -341,7 +357,7 @@ Standard per-project `dotnet build`:
 ```bash
 dotnet build AzureDevOpsForager.Core
 dotnet build AzureDevOpsForager.Server
-dotnet build AzureDevOpsForager.Indexer     # net8.0-windows → build on Windows
+dotnet build AzureDevOpsForager.Indexer     # net10.0-windows → build on Windows
 dotnet build AzureDevOpsForager.WinForms    # net48 → build on Windows
 ```
 
@@ -354,7 +370,7 @@ Framework notes that matter when you touch project files:
 
 ### 6.2 Tests
 
-`AzureDevOpsForager.Tests` (`net8.0-windows`, xUnit) references `Core` and `Indexer`. Current suites are pure-logic (no live SQL, no models):
+`AzureDevOpsForager.Tests` (`net10.0-windows`, xUnit) references `Core` and `Indexer`. Current suites are pure-logic (no live SQL, no models):
 
 - `ConfigTests` — config layering / parsing.
 - `GitHubServiceTests` — `ParseRepoUrl` across URL shapes.
@@ -444,7 +460,7 @@ Most retrieval behavior is config-tunable (no rebuild): RRF weights, `MinFtsRank
 
 ### 8.1 Server on Azure App Service (Linux, Kestrel)
 
-The Server is a self-contained-off `net8.0` app. `Server.BuildApplication` binds Kestrel to `Config.Port` (default 8000) via `ListenAnyIP`, and `AddServerHeader=false`. It can also run as a **Windows Service** (`WindowsServiceHelpers.IsWindowsService()` → `UseWindowsService()`), but the hosted demo runs on **Azure App Service (Linux) behind Kestrel**.
+The Server is a self-contained-off `net10.0` app. `Server.BuildApplication` binds Kestrel to `Config.Port` (default 8000) via `ListenAnyIP`, and `AddServerHeader=false`. It can also run as a **Windows Service** (`WindowsServiceHelpers.IsWindowsService()` → `UseWindowsService()`), but the hosted demo runs on **Azure App Service (Linux) behind Kestrel**.
 
 Deployment shape:
 
@@ -464,7 +480,7 @@ Neither secret is **ever** shipped to a client or stored as a config.json key. S
 
 ### 8.3 Model bundle for the Download wizard
 
-Self-hosters get the embedding model via the Indexer's **Download** link (`IndexerForm.DownloadModelAsync`), which streams `Config.ModelDownloadUrl` (a hosted `.zip`, default an Azure Blob) to a temp file with live percentage logging, extracts it into a chosen folder, resolves the `.onnx`, and persists the path via `SaveUserOverride("OnnxModelPath", ...)`. Host your own bundle by overriding `ModelDownloadUrl` in config. The two **local lightweight models** (the hosted demo instead runs `bge-code-v1` + `Qwen3-Reranker-4B` on HF endpoints):
+Self-hosters get the embedding model via the Indexer's **Download** link (`IndexerForm.DownloadModelAsync`), which streams `Config.ModelDownloadUrl` (a hosted `.zip`, default an Azure Blob) to a temp file with live percentage logging, extracts it into a chosen folder, resolves the `.onnx`, and persists the path via `SaveUserOverride("OnnxModelPath", ...)`. Host your own bundle by overriding `ModelDownloadUrl` in config. The two **local lightweight models** (the hosted demo instead runs `bge-code-v1` + `Qwen3-Reranker-0.6B` on HF endpoints):
 
 | Model | Files (under `models/`) | Purpose |
 |-------|-------------------------|---------|
@@ -473,7 +489,7 @@ Self-hosters get the embedding model via the Indexer's **Download** link (`Index
 
 Both are permissively licensed and redistributable (e5-large-v2 under MIT, bge-reranker-v2-m3 under Apache 2.0). The reranker is optional (`RerankerEnabled=false` → RRF-only). `./models/download-models.ps1` fetches both for a from-source setup.
 
-**The local bundle is itself optional when HF is configured.** Point `HuggingFaceEmbedUrl` (and optionally `HuggingFaceRerankUrl`) at HF Inference Endpoints serving the code-specialized models (`bge-code-v1` on TEI, `Qwen3-Reranker-4B-seq-cls` on vLLM — keep `EmbeddingDimension` at its 1536 default) and supply `HF_TOKEN` (§5.2, §8.2), and the Server + Indexer load **no local ONNX** — no ~1.3 GB model download at all — while a GPU-backed endpoint reindexes an estimated ~10–15× faster than local CPU ONNX (minutes → seconds, hardware-dependent; scale-to-zero cold starts are absorbed by the warm-up retry, §4.3). The Download wizard is only for the offline / no-account (local ONNX) path.
+**The local bundle is itself optional when HF is configured.** Point `HuggingFaceEmbedUrl` (and optionally `HuggingFaceRerankUrl`) at HF Inference Endpoints serving the code-specialized models (`bge-code-v1` on TEI, `Qwen3-Reranker-0.6B-seq-cls` on vLLM — keep `EmbeddingDimension` at its 1536 default) and supply `HF_TOKEN` (§5.2, §8.2), and the Server + Indexer load **no local ONNX** — no ~1.3 GB model download at all — while a GPU-backed endpoint reindexes an estimated ~10–15× faster than local CPU ONNX (minutes → seconds, hardware-dependent; scale-to-zero cold starts are absorbed by the warm-up retry, §4.3). The Download wizard is only for the offline / no-account (local ONNX) path.
 
 ### 8.4 Zero-downtime prod reindex
 

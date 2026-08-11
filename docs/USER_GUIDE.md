@@ -250,7 +250,7 @@ Leave the **Model Override Path** blank and don't configure any HF endpoints, an
 Instead of downloading ~1.3 GB of models, you can point the app at **Hugging Face Inference Endpoints** that run **code-specialized models** remotely — this is exactly how the hosted demo runs:
 
 - **Embedding** — `BAAI/bge-code-v1`, a code-specialized 1536-dimension embedding model. Keep `EmbeddingDimension` at its default of `1536` in `config.json` for this model.
-- **Reranking** — `Qwen3-Reranker-4B`, served via the endpoint's `/rerank` API.
+- **Reranking** — `Qwen3-Reranker-0.6B`, served via the endpoint's `/rerank` API.
 
 These are different models than the local ONNX pair (Option 3), so their vectors are not interchangeable — an index built with one embedding model must be fully rebuilt to search with the other.
 

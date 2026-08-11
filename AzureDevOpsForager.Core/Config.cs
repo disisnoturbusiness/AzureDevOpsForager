@@ -121,7 +121,7 @@ public static class Config
       System.Environment.GetEnvironmentVariable( "HUGGINGFACE_EMBED_URL" ) ?? "";
 
    /// <summary>
-   /// Hugging Face Inference Endpoint URL for reranking (Qwen3-Reranker-4B in its sequence-classification
+   /// Hugging Face Inference Endpoint URL for reranking (Qwen3-Reranker-0.6B in its sequence-classification
    /// form, served by vLLM). The client appends the "/rerank" route (Jina-compatible API). When set with a
    /// token, ranking runs remotely instead of via the local ONNX reranker. Also settable via the
    /// HUGGINGFACE_RERANK_URL environment variable (config.json wins when both are set).
@@ -158,7 +158,7 @@ public static class Config
    /// error. Readable from RERANKER_MODEL_NAME so the pair can be swapped together as settings.
    /// </remarks>
    public static string RerankerModelName { get; set; } =
-      System.Environment.GetEnvironmentVariable( "RERANKER_MODEL_NAME" ) ?? "tomaarsen/Qwen3-Reranker-4B-seq-cls";
+      System.Environment.GetEnvironmentVariable( "RERANKER_MODEL_NAME" ) ?? "tomaarsen/Qwen3-Reranker-0.6B-seq-cls";
 
    /// <summary>
    /// The Hugging Face API token, resolved from the HF_TOKEN environment variable or the encrypted
@@ -295,10 +295,19 @@ public static class Config
    /// happen to fall.
    /// </para>
    /// <para>
-   /// Genuine semantic matches are unaffected: a real conceptual hit found without the literal term
-   /// scores far above this — around 0.98 on the measured set — so vector-only retrieval, which is the
-   /// whole point of the system, still works. Set to 0 to disable and treat vector-only hits like any
-   /// other.
+   /// The default is picked from the measured gap rather than guessed. Across a ten-query set on the
+   /// eShopOnWeb index, the four unanswerable queries topped out at 0.0089 / 0.0035 / 0.0013 / 0.0011,
+   /// while the weakest hit of any genuinely-answered query scored 0.279 and most scored above 0.9. That
+   /// is a 31x gap with nothing inside it; 0.05 is its geometric midpoint, so the floor sits 5.6x above
+   /// the loudest false positive and 5.6x below the quietest true one.
+   /// </para>
+   /// <para>
+   /// This is still an absolute number, which is the trap <see cref="MinRerankScoreRatio"/> exists to
+   /// avoid, and it will need re-measuring if the reranker changes. It is tolerable only because it
+   /// applies to the vector-only subset: a badly-chosen value costs those hits, where a badly-chosen
+   /// global floor empties every search. Re-measure by setting MINVECTORONLY_RERANK_SCORE=0, running a
+   /// mixed answerable/unanswerable query set, and reading rerank_score off the returned metadata. Set
+   /// to 0 to disable and treat vector-only hits like any other.
    /// </para>
    /// </summary>
    public static double MinVectorOnlyRerankScore { get; set; } = ReadEnvDouble( "MINVECTORONLY_RERANK_SCORE", 0.05 );

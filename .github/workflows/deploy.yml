@@ -15,7 +15,7 @@ env:
   PUBLISH_DIR: publish
 
 jobs:
-  # The test project targets net8.0-windows and references the WinForms Indexer, so it
+  # The test project targets net10.0-windows and references the WinForms Indexer, so it
   # cannot run on a Linux runner. It gates the deploy rather than running alongside it.
   test:
     runs-on: windows-latest
