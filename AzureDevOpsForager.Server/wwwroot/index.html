@@ -62,24 +62,16 @@
   </header>
 
   <main class="shell">
-    <nav class="modes" role="tablist" aria-label="Mode">
-      <button class="mode-tab is-active" id="tabSearch" role="tab" aria-selected="true">
-        <span class="mode-ico">⌕</span> Search
-      </button>
-      <button class="mode-tab" id="tabChat" role="tab" aria-selected="false">
-        <span class="mode-ico">❯</span> Ask
-      </button>
-    </nav>
-
-    <!-- ============ SEARCH PANEL ============ -->
+    <!-- No mode picker. One input: a question gets a grounded answer, anything else gets the ranked
+         chunk list. Both render below the form, so the page reads the same either way. -->
     <section class="panel" id="panelSearch" role="tabpanel">
       <form class="search-form" id="searchForm" autocomplete="off">
         <div class="search-row">
           <div class="field grow">
             <span class="field-ico" aria-hidden="true">⌕</span>
             <input type="text" id="searchInput" name="q"
-                   placeholder="Search the codebase — e.g. &quot;retry with exponential backoff&quot;, &quot;JWT token validation&quot;…"
-                   aria-label="Search query" />
+                   placeholder="Search or ask — e.g. &quot;PaymentMethod&quot;, or &quot;how does the basket total get calculated?&quot;"
+                   aria-label="Search or ask a question about the code" />
           </div>
           <button type="submit" class="btn btn-primary" id="searchBtn">
             <span class="btn-label">Search</span>
@@ -113,30 +105,10 @@
       <div class="results" id="results"></div>
       <div class="empty-state" id="searchEmpty">
         <div class="empty-glyph">🌾</div>
-        <p>Forage the codebase. Enter a query to surface the most relevant chunks across vector and full-text indexes.</p>
+        <p>Forage the codebase. Type a name to find the code, or ask a question to get an answer grounded in it.</p>
       </div>
     </section>
 
-    <!-- ============ CHAT PANEL ============ -->
-    <section class="panel is-hidden" id="panelChat" role="tabpanel">
-      <div class="chat-log" id="chatLog">
-        <div class="empty-state" id="chatEmpty">
-          <div class="empty-glyph">❯_</div>
-          <p>Ask a question about the codebase in natural language. Answers are grounded in the indexed source and cite the files they came from.</p>
-        </div>
-      </div>
-      <form class="chat-form" id="chatForm" autocomplete="off">
-        <div class="field grow">
-          <span class="field-ico" aria-hidden="true">❯</span>
-          <input type="text" id="chatInput"
-                 placeholder="Ask about the code — e.g. &quot;How does the hybrid search RRF fusion work?&quot;"
-                 aria-label="Chat question" />
-        </div>
-        <button type="submit" class="btn btn-primary" id="chatBtn">
-          <span class="btn-label">Ask</span>
-        </button>
-      </form>
-    </section>
   </main>
 
   <footer class="foot">
@@ -160,6 +132,6 @@
     </p>
   </footer>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
