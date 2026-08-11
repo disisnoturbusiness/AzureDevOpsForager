@@ -170,4 +170,120 @@ public class RelevanceGateTests
       Assert.Equal( "b", ordered[0].FilePath );
       Assert.Equal( 1, dropped );
    }
+
+   #region Vector-only floor
+
+   private const double VectorOnlyFloor = 0.05;
+
+   /// <summary>A hit the procedure reached on vector similarity alone: both full-text legs contributed zero.</summary>
+   private static (string FilePath, string Content, Dictionary<string, string> Meta) VectorOnlyRow( string path ) =>
+      (path, $"content of {path}", new Dictionary<string, string>
+      {
+         ["_file_path"] = path,
+         ["match_source"] = "Vector",
+         ["chunk_fts_rrf"] = "0",
+         ["file_fts_rrf"] = "0"
+      });
+
+   /// <summary>A hit at least one full-text leg also matched, so a real term in the query appears in the corpus.</summary>
+   private static (string FilePath, string Content, Dictionary<string, string> Meta) LexicalRow( string path ) =>
+      (path, $"content of {path}", new Dictionary<string, string>
+      {
+         ["_file_path"] = path,
+         ["match_source"] = "Hybrid",
+         ["chunk_fts_rrf"] = "0.0163",
+         ["file_fts_rrf"] = "0"
+      });
+
+   [Fact]
+   public void VectorOnlyHitsScoringLow_AreDropped_WhileLexicallySupportedOnesSurvive()
+   {
+      // The "garbage" / "zebra" case, measured live: a word the corpus has never seen still returns five
+      // confident-looking files, because vector search always yields its nearest neighbours no matter how
+      // far away they are. Every one of them came back match_source=Vector with both FTS legs at zero and
+      // a top rerank score of 0.009 — too low to be a real match, too high for the relative ratio to catch
+      // (0.009 * 0.1 keeps everything below it). The absolute floor applies to those and nothing else.
+      var rows = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>
+      {
+         VectorOnlyRow( "unrelated1" ),
+         LexicalRow( "hasTheTerm" ),
+         VectorOnlyRow( "unrelated2" )
+      };
+
+      var (ordered, dropped) = HybridSearchService.ApplyRelevanceGate(
+         Scores( 0.0090, 0.0035, 0.0020 ), rows, Ratio, TopFloor, VectorOnlyFloor );
+
+      Assert.Single( ordered );
+      Assert.Equal( "hasTheTerm", ordered[0].FilePath );
+      Assert.Equal( 2, dropped );
+   }
+
+   [Fact]
+   public void GenuineSemanticMatch_SurvivesWithoutAnyLexicalSupport()
+   {
+      // The floor must not punish vector-only hits as a class. "how many bits in a byte" finds the right
+      // file with no keyword overlap at all — the reranker scores those around 0.98, twenty times the
+      // floor. If this test ever fails, the floor has been raised into the range of real answers.
+      var rows = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>
+      {
+         VectorOnlyRow( "TrueSemanticHit" ),
+         VectorOnlyRow( "alsoRelevant" )
+      };
+
+      var (ordered, dropped) = HybridSearchService.ApplyRelevanceGate(
+         Scores( 0.98, 0.61 ), rows, Ratio, TopFloor, VectorOnlyFloor );
+
+      Assert.Equal( 2, ordered.Count );
+      Assert.Equal( 0, dropped );
+   }
+
+   [Fact]
+   public void VectorOnlyFloorOfZero_ReproducesTheOldBehaviourExactly()
+   {
+      // The parameter defaults to 0 and every existing caller and test relies on that meaning "no
+      // distinction". Same input as the drop test above, floor disabled: all three come back.
+      var rows = new List<(string FilePath, string Content, Dictionary<string, string> Meta)>
+      {
+         VectorOnlyRow( "unrelated1" ),
+         LexicalRow( "hasTheTerm" ),
+         VectorOnlyRow( "unrelated2" )
+      };
+
+      var (ordered, dropped) = HybridSearchService.ApplyRelevanceGate(
+         Scores( 0.0090, 0.0035, 0.0020 ), rows, Ratio, TopFloor, minVectorOnlyScore: 0 );
+
+      Assert.Equal( 3, ordered.Count );
+      Assert.Equal( 0, dropped );
+   }
+
+   [Fact]
+   public void RowsWithoutProvenanceMetadata_AreJudgedByTheRelativeGateOnly()
+   {
+      // The full-text-only fallback path and SearchByFilename build rows without the RRF columns. Absent
+      // provenance must not be read as "vector-only", or an embedder outage would empty search twice over.
+      var (ordered, dropped) = HybridSearchService.ApplyRelevanceGate(
+         Scores( 0.0090, 0.0035 ), Rows( "a", "b" ), Ratio, TopFloor, VectorOnlyFloor );
+
+      Assert.Equal( 2, ordered.Count );
+      Assert.Equal( 0, dropped );
+   }
+
+   [Fact]
+   public void NonZeroFileFtsLeg_CountsAsSupport_EvenWhenTheChunkLegIsZero()
+   {
+      // Either leg is enough: a filename match with no in-content hit still proves the term exists.
+      var row = LexicalRow( "NamedForTheTerm" );
+      row.Meta["chunk_fts_rrf"] = "0";
+      row.Meta["file_fts_rrf"] = "0.0161";
+
+      var rows = new List<(string FilePath, string Content, Dictionary<string, string> Meta)> { row };
+
+      var (ordered, dropped) = HybridSearchService.ApplyRelevanceGate(
+         Scores( 0.004 ), rows, Ratio, TopFloor, VectorOnlyFloor );
+
+      Assert.Single( ordered );
+      Assert.Equal( 0, dropped );
+   }
+
+   #endregion Vector-only floor
 }

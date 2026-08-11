@@ -273,6 +273,37 @@ public static class Config
    public static double MinRerankTopScore { get; set; } = ReadEnvDouble( "MINRERANK_TOP_SCORE", 0.000001 );
 
    /// <summary>
+   /// Minimum rerank score a result needs when it has NO lexical support — that is, when neither the
+   /// chunk-level nor the file-level full-text leg matched it and it reached the result set on vector
+   /// similarity alone. Results with any lexical corroboration are judged by
+   /// <see cref="MinRerankScoreRatio"/> as usual; this is a second, much higher bar applied only to the
+   /// vector-only ones.
+   /// <para>
+   /// The problem it solves: vector search always returns its nearest neighbours, however far away they
+   /// are. Searching a term the codebase has never heard of still yields a full page — measured here,
+   /// "garbage", "zebra", "kubernetes" and "chocolate cake" each returned five files, none of which
+   /// contained the term anywhere. Every single one of those hits was vector-only, with zero full-text
+   /// support, while every genuine query in the same test set produced at least one Hybrid or FullText
+   /// hit. Lexical corroboration turns out to be the clean structural signal that a term actually exists
+   /// in the corpus.
+   /// </para>
+   /// <para>
+   /// Score alone cannot make this call, which is why the ratio is not enough on its own: "garbage" tops
+   /// out at 0.009 while "how many bits in a byte" — a query whose single result was correct — tops out
+   /// at 0.0033. Any flat threshold that rejects the first also rejects the second. Splitting on lexical
+   /// support separates them cleanly because it does not depend on where a particular model's scores
+   /// happen to fall.
+   /// </para>
+   /// <para>
+   /// Genuine semantic matches are unaffected: a real conceptual hit found without the literal term
+   /// scores far above this — around 0.98 on the measured set — so vector-only retrieval, which is the
+   /// whole point of the system, still works. Set to 0 to disable and treat vector-only hits like any
+   /// other.
+   /// </para>
+   /// </summary>
+   public static double MinVectorOnlyRerankScore { get; set; } = ReadEnvDouble( "MINVECTORONLY_RERANK_SCORE", 0.05 );
+
+   /// <summary>
    /// Reads a double from an environment variable, falling back to <paramref name="fallback"/> when it is
    /// unset or unparseable. Invariant culture, so a value set on a host with a comma decimal separator
    /// still reads correctly.
