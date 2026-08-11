@@ -161,10 +161,43 @@ public class HuggingFaceReranker : IReranker
          var status = (int)response.StatusCode;
          var transient = status == 503 || status == 429 || status == 409 || status == 500 || status == 502 || status == 504;
          if( !transient || attempt >= maxAttempts )
-            response.EnsureSuccessStatusCode();
+            throw new HttpRequestException( await DescribeFailureAsync( response ) );
 
          await Task.Delay( TimeSpan.FromSeconds( Math.Min( 10, attempt * 2 ) ), cancellationToken );
       }
+   }
+
+   /// <summary>
+   /// Builds the failure message for a non-retryable response, including the start of the response body.
+   /// <para>
+   /// The body is the whole point. EnsureSuccessStatusCode throws with the status code alone, and a bare
+   /// "404 (Not Found)" cannot distinguish the two failures that produce it, which have opposite fixes:
+   /// FastAPI returning {"detail":"Not Found"} because the /rerank ROUTE was never registered — vLLM only
+   /// exposes it when the model runs as a pooling/scoring model, so pointing an endpoint at a generative
+   /// repo instead of its sequence-classification conversion silently loses the route — versus vLLM's own
+   /// {"message":"The model `X` does not exist"} when the route is fine and RerankerModelName is wrong.
+   /// One is fixed by changing the model repo, the other by changing a setting. Both are invisible from
+   /// outside because reranking is fail-soft, so the only cost of guessing wrong is hours.
+   /// </para>
+   /// </summary>
+   private static async Task<string> DescribeFailureAsync( HttpResponseMessage response )
+   {
+      var body = string.Empty;
+      try
+      {
+         body = ( await response.Content.ReadAsStringAsync() ?? string.Empty ).Trim();
+      }
+      catch
+      {
+         // A body we cannot read must not replace the status code we can report.
+      }
+
+      const int maxBodyLength = 400;
+      if( body.Length > maxBodyLength )
+         body = body.Substring( 0, maxBodyLength ) + "…";
+
+      return $"{(int)response.StatusCode} ({response.ReasonPhrase}) from {response.RequestMessage?.RequestUri}" +
+             ( body.Length > 0 ? $" — {body}" : " — empty response body" );
    }
 
    /// <summary>
