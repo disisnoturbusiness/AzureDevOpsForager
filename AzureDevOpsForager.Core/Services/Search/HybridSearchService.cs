@@ -101,11 +101,14 @@ public class HybridSearchService : IDisposable
                StartRerankerWarmup();
 
                var queryVector = await _embeddingService.EmbedQueryAsync( request.Question );
-               return await SearchViaProcAsync( queryVector, request );
+               return await SearchViaProcWithRetryAsync( queryVector, request );
             }
             catch( Exception vectorException )
             {
-               Log( $"[SEARCH] RRF proc path failed, falling back to FTS-only: {vectorException.Message}" );
+               // Include the SqlException number: the fallback below is silent from the outside (search
+               // simply gets worse), so the error identity is the only way to tell a one-off from a
+               // systemic failure, and it is what tells us whether to add the code to SqlResilience.
+               Log( $"[SEARCH] RRF proc path failed, falling back to FTS-only: {Describe( vectorException )}" );
             }
          }
 
@@ -142,6 +145,64 @@ public class HybridSearchService : IDisposable
       }
 
       return response;
+   }
+
+   /// <summary>
+   /// Runs the RRF proc path, retrying a small number of times when it fails because SQL Server's
+   /// full-text filter daemon (FDHost) is not ready.
+   /// <para>
+   /// This is specifically a serverless-resume symptom. When the database wakes, the engine accepts
+   /// connections before full-text is fully available, so the first queries after a resume can fail with
+   /// "SQL Server encountered error 0x80004005 while communicating with the full-text filter daemon host
+   /// (FDHost) process". SqlResilience cannot cover it: its retry list is connection-level transient codes
+   /// and this failure happens once the command is already executing.
+   /// </para>
+   /// <para>
+   /// Microsoft documents this failure class as self-healing — the daemon "will be restarted
+   /// automatically" — so a short backoff is the correct response. Without it the request falls through to
+   /// the full-text-only path, which means the vector leg vanishes for exactly the first queries after a
+   /// wake: the cold visitor, i.e. the worst possible person to serve degraded results to, and with no
+   /// outward sign anything went wrong.
+   /// </para>
+   /// </summary>
+   private async Task<SearchResponse> SearchViaProcWithRetryAsync( float[] queryVector, SearchRequest request )
+   {
+      const int maxAttempts = 3;
+
+      for( var attempt = 1; ; attempt++ )
+      {
+         try
+         {
+            return await SearchViaProcAsync( queryVector, request );
+         }
+         catch( Exception exception ) when( attempt < maxAttempts && IsFullTextDaemonFailure( exception ) )
+         {
+            var delay = TimeSpan.FromSeconds( 2 * attempt );
+            Log( $"[SEARCH] Full-text daemon not ready (attempt {attempt}/{maxAttempts}), retrying in {delay.TotalSeconds:F0}s: {Describe( exception )}" );
+            await Task.Delay( delay );
+         }
+      }
+   }
+
+   /// <summary>
+   /// True when an exception is the full-text filter daemon being unavailable rather than a real query
+   /// fault. Matched on the message because the engine reports this through more than one error number and
+   /// guessing at a specific code would silently fail to retry — <see cref="Describe"/> logs the actual
+   /// number so the codes seen in practice can be added to SqlResilience.
+   /// </summary>
+   private static bool IsFullTextDaemonFailure( Exception exception )
+   {
+      var message = exception?.Message ?? "";
+      return message.IndexOf( "filter daemon", StringComparison.OrdinalIgnoreCase ) >= 0
+          || message.IndexOf( "FDHost", StringComparison.OrdinalIgnoreCase ) >= 0;
+   }
+
+   /// <summary>Formats an exception with its SqlException number and class when it has one.</summary>
+   private static string Describe( Exception exception )
+   {
+      return exception is SqlException sqlException
+         ? $"Msg {sqlException.Number} (class {sqlException.Class}, state {sqlException.State}): {sqlException.Message}"
+         : $"{exception?.GetType().Name}: {exception?.Message}";
    }
 
    /// <summary>
