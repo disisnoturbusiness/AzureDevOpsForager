@@ -91,20 +91,46 @@
   }
 
   // ===================================================================
-  // mode switching
+  // question detection — decides answer-vs-results without the user choosing
   // ===================================================================
-  function setMode(mode) {
-    const isSearch = mode === "search";
-    tabSearch.classList.toggle("is-active", isSearch);
-    tabChat.classList.toggle("is-active", !isSearch);
-    tabSearch.setAttribute("aria-selected", String(isSearch));
-    tabChat.setAttribute("aria-selected", String(!isSearch));
-    panelSearch.classList.toggle("is-hidden", !isSearch);
-    panelChat.classList.toggle("is-hidden", isSearch);
-    setTimeout(() => (isSearch ? searchInput : chatInput).focus(), 60);
+
+  // Words that open a question. Deliberately a fixed list rather than a model call: this runs on every
+  // keystroke-free submit and must be instant, and the cost of a wrong guess is asymmetric — see below.
+  const QUESTION_OPENERS = new Set([
+    "how", "what", "why", "when", "where", "who", "which", "whose", "whom",
+    "can", "could", "do", "does", "did", "is", "are", "was", "were",
+    "should", "would", "will", "shall", "has", "have", "am"
+  ]);
+
+  /**
+   * True when a query reads as a question and should be answered rather than listed.
+   *
+   * The guard against identifiers matters more than the opener list. "PaymentMethod", "IEmailSender"
+   * and "HttpService.GetAsync()" must never be routed to the answer path: for an identifier you want
+   * the code, and running one through the LLM costs a Groq call to bury the thing you asked for.
+   *
+   * The failure modes are not symmetric, so this biases toward search. A question mistakenly run as a
+   * search still shows real matching code — mildly worse. An identifier mistakenly run as an answer
+   * hides the code behind prose and spends money doing it.
+   */
+  function isQuestion(raw) {
+    const q = (raw || "").trim();
+    if (!q) return false;
+
+    // A trailing question mark is unambiguous intent; take it regardless of shape.
+    if (q.endsWith("?")) return true;
+
+    const words = q.split(/\s+/);
+    if (words.length < 3) return false;            // "how" or "PaymentMethod" alone is not a question
+
+    const first = words[0].toLowerCase().replace(/[^a-z]/g, "");
+    if (!QUESTION_OPENERS.has(first)) return false;
+
+    // Anything carrying code punctuation is a lookup even if it starts with a question word.
+    if (/[._()\[\]<>{}#]/.test(q)) return false;
+
+    return true;
   }
-  tabSearch.addEventListener("click", () => setMode("search"));
-  tabChat.addEventListener("click", () => setMode("chat"));
 
   // ===================================================================
   // health + facets
@@ -179,56 +205,106 @@
   // ===================================================================
   // SEARCH
   // ===================================================================
+  // One input, no mode picker. A question is answered; anything else is listed. Both render into the
+  // same area below the form, so the page behaves identically either way and the only thing that
+  // changes is whether an answer sits above the matching code.
   searchForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const q = searchInput.value.trim();
     if (!q) { searchInput.focus(); return; }
 
+    const asking = isQuestion(q);
+
     searchBtn.disabled = true;
     searchBtn.classList.add("is-loading");
     searchStatus.classList.remove("err");
-    searchStatus.textContent = "searching…";
+    searchStatus.textContent = asking ? "answering…" : "searching…";
     searchEmpty.style.display = "none";
-    // Same cold-start hint for search (first query after idle warms the embedding endpoint).
+    resultsEl.innerHTML = "";
+    // Same cold-start hint either way (first request after idle warms the embedding endpoint).
     const warmTimer = setTimeout(() => {
       searchStatus.textContent = "waking up the server - the search endpoints and the database can take up to 2 minutes to spin up on the first query after an idle period...";
     }, 6000);
 
-    const body = {
-      question: q,
-      moduleFilter: moduleFilter.value || "All",
-      nResults: parseInt(nResultsSel.value, 10) || 5
-    };
-
     const t0 = performance.now();
     try {
-      const r = await fetch("/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body)
-      });
-      if (!r.ok) throw new Error("Server returned HTTP " + r.status);
-      const data = await r.json();
-
-      if (data.error) {
-        renderSearchError(data.error);
-        return;
-      }
-
-      const ids = (data.ids && data.ids[0]) || [];
-      const docs = (data.documents && data.documents[0]) || [];
-      const metas = (data.metadatas && data.metadatas[0]) || [];
-      const ms = Math.round(performance.now() - t0);
-
-      renderResults(ids, docs, metas, ms);
+      if (asking) await runAsk(q, t0);
+      else await runSearch(q, t0);
     } catch (err) {
-      renderSearchError(err.message || "Search failed");
+      renderSearchError(err.message || (asking ? "Answer failed" : "Search failed"));
     } finally {
       clearTimeout(warmTimer);
       searchBtn.disabled = false;
       searchBtn.classList.remove("is-loading");
     }
   });
+
+  /** Ranked chunk list — the lookup path, for identifiers and keyword queries. */
+  async function runSearch(q, t0) {
+    const body = {
+      question: q,
+      moduleFilter: moduleFilter.value || "All",
+      nResults: parseInt(nResultsSel.value, 10) || 5
+    };
+
+    const r = await fetch("/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error("Server returned HTTP " + r.status);
+    const data = await r.json();
+    if (data.error) { renderSearchError(data.error); return; }
+
+    renderResults(
+      (data.ids && data.ids[0]) || [],
+      (data.documents && data.documents[0]) || [],
+      (data.metadatas && data.metadatas[0]) || [],
+      Math.round(performance.now() - t0)
+    );
+  }
+
+  /** Grounded answer plus the chunks it was grounded in, rendered as the same cards search uses. */
+  async function runAsk(q, t0) {
+    const r = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ question: q, moduleFilter: moduleFilter.value || "All" })
+    });
+    if (r.status === 404) throw new Error("The answer endpoint isn't available on this server.");
+    if (!r.ok) throw new Error("Server returned HTTP " + r.status);
+
+    const data = await r.json();
+    const answer = data.answer ?? data.Answer ?? "(no answer returned)";
+    const results = data.results ?? data.Results ?? null;
+    const ms = Math.round(performance.now() - t0);
+
+    const ids = (results && results.ids && results.ids[0]) || [];
+    const docs = (results && results.documents && results.documents[0]) || [];
+    const metas = (results && results.metadatas && results.metadatas[0]) || [];
+
+    searchStatus.innerHTML =
+      `answered in <span class="hl">${formatDuration(ms)}</span>` +
+      (ids.length ? ` · <span class="hl">${ids.length}</span> source${ids.length === 1 ? "" : "s"}` : "");
+
+    const block = document.createElement("div");
+    block.className = "answer-block";
+    block.innerHTML = `<div class="answer-body">${renderMarkdown(answer)}</div>`;
+
+    if (ids.length) {
+      const wrap = document.createElement("div");
+      wrap.className = "sources";
+      wrap.innerHTML = `<div class="sources-title">Sources</div>`;
+      const cards = document.createElement("div");
+      cards.className = "source-results";
+      ids.forEach((path, i) => cards.appendChild(buildResult(i, path, docs[i] || "", metas[i] || {}, false)));
+      wrap.appendChild(cards);
+      block.appendChild(wrap);
+    }
+
+    block.appendChild(buildFeedback(q, answer));
+    resultsEl.appendChild(block);
+  }
 
   function renderSearchError(msg) {
     resultsEl.innerHTML = "";
@@ -267,7 +343,7 @@
     return `<span class="badge ${cls}">${esc(label)}</span>`;
   }
 
-  function buildResult(idx, path, content, meta) {
+  function buildResult(idx, path, content, meta, autoOpen = true) {
     const chunkName = meta.chunk_name || meta.class_name || "(chunk)";
     const chunkType = meta.chunk_type || "";
     const ns = meta.namespace || "";
@@ -332,8 +408,10 @@
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
     });
 
-    // auto-expand the top result
-    if (idx === 0) { card.classList.add("open"); head.setAttribute("aria-expanded", "true"); }
+    // Auto-expand the top hit only when it IS the result — i.e. a plain search, where the best match is
+    // what you came for. Under an answer the code has already been explained above, so opening a card
+    // uninvited just pushes the rest of the sources off screen. There they all start collapsed.
+    if (idx === 0 && autoOpen) { card.classList.add("open"); head.setAttribute("aria-expanded", "true"); }
 
     return card;
   }
@@ -357,7 +435,10 @@
   // ===================================================================
   let chatBusy = false;
 
-  chatForm.addEventListener("submit", async (e) => {
+  // The separate Ask panel is gone — one input routes by question detection. This handler is kept
+  // behind a null guard so the file still works if the panel is ever reinstated, and so removing the
+  // markup cannot take the whole script down with a null dereference at load.
+  chatForm && chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (chatBusy) return;
     const q = chatInput.value.trim();
@@ -459,7 +540,7 @@
       wrap.innerHTML = `<div class="sources-title">Sources</div>`;
       const cards = document.createElement("div");
       cards.className = "source-results";
-      ids.forEach((path, i) => cards.appendChild(buildResult(i, path, docs[i] || "", metas[i] || {})));
+      ids.forEach((path, i) => cards.appendChild(buildResult(i, path, docs[i] || "", metas[i] || {}, false)));
       wrap.appendChild(cards);
       el.appendChild(wrap);
     } else {
