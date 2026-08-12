@@ -289,6 +289,7 @@ via local ONNX Runtime) · Roslyn · Groq (llama-3.3-70b).
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — installing, indexing a codebase, and using search + chat.
 - [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) — architecture, the retrieval pipeline, and extending it.
 - [docs/FUNCTIONAL_MATRIX.md](docs/FUNCTIONAL_MATRIX.md) — every capability, where it lives in the code, and how it's verified.
+- [docs/MODEL_SELECTION.md](docs/MODEL_SELECTION.md) — why these models and this serving stack: e5 → bge-code-v1, bge-reranker → Qwen3, 4B → 0.6B, and the measured cold-start numbers behind each call.
 
 ## License
 
