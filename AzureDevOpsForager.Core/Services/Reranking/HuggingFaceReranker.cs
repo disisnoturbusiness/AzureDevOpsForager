@@ -103,8 +103,10 @@ public class HuggingFaceReranker : IReranker
       {
          var wrappedQuery = PromptPrefix + $"<Instruct>: {Config.RerankerInstruction}\n<Query>: {query ?? ""}\n";
          var documents = candidates.Select( candidate => $"<Document>: {candidate.Preview ?? ""}" + PromptSuffix ).ToList();
+         // The toolkit wants the standard HF envelope: the {query, texts} object the playground shows is the
+         // VALUE of "inputs", not the body. Sending it bare returns 400 "Body needs to provide a inputs key".
          var payload = _useToolkitFormat
-            ? JsonConvert.SerializeObject( new { query = wrappedQuery, texts = documents } )
+            ? JsonConvert.SerializeObject( new { inputs = new { query = wrappedQuery, texts = documents } } )
             : JsonConvert.SerializeObject( new
             {
                model = Config.RerankerModelName,
