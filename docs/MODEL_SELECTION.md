@@ -39,12 +39,13 @@ practical difference shows up as natural-language questions actually reaching th
   *asymmetric* in a different way: queries are wrapped `<instruct>{task}\n<query>{text}`, documents are
   embedded raw. Get this mismatched between index time and query time and every distance inflates.
 
-**The trap this created — worth the whole section.** `MaxVectorDistance` was left at `0.5`, a value
-calibrated for e5. bge-code-v1 puts code→code distances at 0.11–0.44 but natural-language→code at
-**~0.49 and up**. So the ceiling sat just below where every realistic query lands, the vector leg
-returned zero rows for weeks, RRF quietly fused only the two full-text signals, and the application
-kept returning plausible-looking results the whole time. Nothing errored. See
-[§4](#4-what-actually-goes-wrong) — this is the single most expensive thing in this document.
+**The non-obvious part: the distance ceiling is model-specific.** `MaxVectorDistance` gates which vector
+candidates are admitted at all, and `0.5` is a sensible value for e5. bge-code-v1 places code→code
+distances at 0.11–0.44 but natural-language→code at **~0.49 and up** — so under the new model that same
+ceiling sits just below where every realistic question lands, admitting nothing. RRF then fuses only the
+two full-text signals and the application returns plausible results with its headline feature
+contributing zero. Nothing errors, which is what makes it worth calling out. See
+[§5](#5-failure-modes-worth-designing-against).
 
 ---
 
@@ -94,7 +95,7 @@ Weight loading is **1.3 seconds of a 64-second container startup**. Everything e
 roughly 36 s of Python/torch import and CUDA context creation before a weight is read, then ~21 s of
 `torch.compile`. Shrinking the model only ever attacked the 1.3-second row.
 
-Two corollaries, both learned the expensive way:
+Two corollaries follow, and both cut off popular optimisations before they start:
 
 - A **bf16 conversion is pointless here.** The seq-cls repo is fp32 and twice the bytes, but vLLM
   already downcasts on load (`Model loading took 1.12 GiB` for a 0.6B model), so it costs nothing in
@@ -174,27 +175,33 @@ separation to know when to stay quiet, and cheap enough to leave running in publ
 
 ---
 
-## 5. What actually goes wrong
+## 5. Failure modes worth designing against
 
-Every failure in this project's retrieval history has been silent. None of them threw.
+Hybrid retrieval degrades quietly. Every one of these produces a working-looking application with a
+dead or mis-tuned component inside it, and none of them raise an error — so the design response is to
+make each one *visible*, not merely to avoid it once.
 
-1. **Tuning constants do not follow a model swap.** `MaxVectorDistance = 0.5` survived the move to
-   bge-code-v1 and emptied the vector leg for weeks. On any model change, grep the config surface for
-   numeric constants and ask of each: *is this expressed in units the model defines?* If yes, it will
-   break. Prefer relative judgements — `MinRerankScoreRatio` is "at least 10% of the best score in this
-   result set", which carries across models because it only depends on the shape of one result set.
-2. **Fail-soft can be indistinguishable from a real answer.** The hosted reranker's fallback used to
-   return `0.0` for every candidate — which the gate correctly read as "everything is irrelevant", so an
-   endpoint outage emptied every search instead of degrading to RRF order. A fallback must emit
-   something structurally impossible (it now returns high descending pseudo-scores), never a value
-   inside the real range.
-3. **Log the response body, not just the status code.** A bare `404` covers both "the route does not
-   exist" and "that model name is not served" — opposite fixes. A bare `400` hid
-   `{"error":"Body needs to provide a inputs key"}`. Both cost hours as status codes and seconds as
-   bodies.
-4. **Health checks lie by default.** This one returned a hardcoded `"Green"` next to a `SELECT COUNT(*)`
-   that never touched the embedding column. It would have reported healthy against an all-NULL vector
-   table.
-5. **Measure before theorising.** Every wrong turn in the cold-start work came from reasoning about a
-   number instead of reading it. The startup logs said `Loading weights took 1.28 seconds` next to
-   `torch.compile took 20.80 s` the entire time.
+1. **Tuning constants do not follow a model swap.** A distance ceiling, a similarity floor and a rerank
+   threshold are all expressed in units the model defines. On any model change, grep the config surface
+   and ask of each constant: *is this a number this model gets a vote on?* If yes, it needs
+   re-measuring. Better, express the judgement so it cannot go stale: `MinRerankScoreRatio` is "at least
+   10% of the best score in this result set", which carries across models because it depends only on the
+   shape of one result set, not on absolute values. The one deliberately absolute threshold
+   (`MinVectorOnlyRerankScore`) is scoped to a subset precisely so that mis-setting it costs those
+   results rather than emptying every search.
+2. **A fail-soft path must not emit values inside the real range.** The hosted reranker's fallback
+   originally returned `0.0` for every candidate — indistinguishable from the model judging everything
+   irrelevant, so an endpoint outage read as "this corpus has no answer" and emptied every search
+   instead of degrading to RRF order. It now returns high descending pseudo-scores: structurally
+   impossible for a real result set, therefore diagnosable.
+3. **Log the response body, not just the status code.** A bare `404` covers both "this route is not
+   registered" and "that model name is not served" — opposite fixes. A bare `400` hides
+   `{"error":"Body needs to provide a inputs key"}`. The status code alone is not a diagnosis.
+4. **Health checks are worth auditing before they are trusted.** This one returned a hardcoded
+   `"Green"` beside a `SELECT COUNT(*)` that never touched the embedding column, so it would have
+   reported healthy against an all-NULL vector table. It now counts non-null embeddings and probes
+   `sys.vector_indexes`.
+5. **The answer is usually already in the logs.** vLLM prints `Loading weights took 1.28 seconds`
+   directly above `torch.compile took 20.80 s in total` on every single start — which is the entire
+   cold-start story, sitting in plain text, for anyone who reads the startup output before reasoning
+   about what "should" be slow.
