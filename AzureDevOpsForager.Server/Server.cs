@@ -414,6 +414,22 @@ public class Server
          var ftsService = app.Services.GetRequiredService<SqlFtsService>();
          Console.WriteLine( $"[SQL FTS] Connected to the code database" );
          Console.WriteLine( $"[SQL FTS] Files indexed: {ftsService.GetFileCount():N0}" );
+
+         // The Server has historically only ever READ schema the Indexer created, so the usage table --
+         // the one thing the Server itself writes -- would otherwise never exist here. Idempotent and
+         // non-fatal: an index that cannot record its own usage is still a working index.
+         _ = Task.Run( async () =>
+         {
+            try
+            {
+               await SchemaInitializer.EnsureUsageTableAsync( Config.SqlConnectionString );
+               Console.WriteLine( "[TELEMETRY] dbo.UsageEvents ready." );
+            }
+            catch( Exception exception )
+            {
+               Console.WriteLine( $"[TELEMETRY] usage table unavailable ({exception.GetType().Name}); usage will not be recorded." );
+            }
+         } );
       } );
    }
 

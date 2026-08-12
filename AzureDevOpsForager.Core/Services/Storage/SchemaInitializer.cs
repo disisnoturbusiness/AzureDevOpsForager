@@ -342,6 +342,23 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
    }
 
    /// <summary>
+   /// Creates dbo.UsageEvents if it is missing, and nothing else.
+   /// <para>
+   /// Exists because <see cref="EnsureSchemaAsync"/> is called only by the Indexer — the Server has never
+   /// created schema, it only reads what the Indexer built. Usage telemetry is the first thing the Server
+   /// itself writes, so without this the table simply never exists in a deployment where the Indexer was
+   /// last run against a different machine, and every insert fails with "Invalid object name". Cheap and
+   /// idempotent, so it can run on every start.
+   /// </para>
+   /// </summary>
+   public static async Task EnsureUsageTableAsync( string connectionString )
+   {
+      using var connection = new SqlConnection( connectionString );
+      await connection.OpenAsync();
+      await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
+   }
+
+   /// <summary>
    /// Usage telemetry: one row per search, answer, or feedback click.
    /// <para>
    /// This lives in SQL rather than a file because the app runs on App Service Linux, whose container
