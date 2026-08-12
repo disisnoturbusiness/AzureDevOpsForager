@@ -134,6 +134,35 @@ CREATE TABLE dbo.CodeChunks
   - On `dbo.CodeFiles`: covers `Content` plus most extracted-metadata columns and the VCS columns (`CommitMessages`, `WorkItemTitles`, `WorkItemTags`, `AllAuthors`). Keyed on `PK_CodeFiles`, `CHANGE_TRACKING AUTO`.
   - On `dbo.CodeChunks`: covers `ChunkContent, ChunkKey, ChunkName, ClassName, Namespace, Signature, ParentContext`. Keyed on `PK_CodeChunks`.
 
+### 2.3.1 Telemetry tables — `dbo.UsageEvents` and `dbo.SiteVisits`
+
+Two small tables the **Server** writes (everything above is written by the Indexer and only read by the
+Server). They are the only part of the schema the Server owns.
+
+| Table | Grain | Columns |
+|---|---|---|
+| `dbo.UsageEvents` | one row per search / answer / feedback click | `OccurredUtc`, `EventType` (`search`\|`ask`\|`feedback`), `Question`, `ResultCount`, `DurationMs`, `Grounded`, `Verdict`, `TopSource` |
+| `dbo.SiteVisits` | one row per page load of `/` | `OccurredUtc`, `ClientIp` |
+
+Both are created by **`EnsureTelemetryTablesAsync`**, which is the single place either is declared.
+`EnsureSchemaAsync` calls it (so the Indexer path creates them when standing up a new database), and the
+Server calls it at startup (because it is the process that writes them). Keeping one list is deliberate:
+when the two tables were added to two different methods, the Indexer path created `UsageEvents` and not
+`SiteVisits`, and a fresh database got half the telemetry schema with the other half only surfacing later
+as failed inserts.
+
+**Portability.** Unlike the main schema, nothing here is engine-version sensitive — `BIGINT IDENTITY`,
+`DATETIME2`, `SYSUTCDATETIME()`, b-tree indexes with `INCLUDE`, `OBJECT_ID` guards. It behaves the same on
+SQL Server 2016+ and Azure SQL, and it does not depend on `VECTOR`, DiskANN or full-text, so telemetry
+still records on an engine where the vector step cannot run. Creation is wrapped in `TryExecAsync`: a
+database where these cannot be created (say, a read-scoped login) still indexes and still searches.
+
+**Grain matters when reading them.** A visitor who runs twenty searches is one row in `SiteVisits` and
+twenty in `UsageEvents` — do not count searches to count people. `UsageEvents` deliberately excludes the
+keep-warm heartbeat's fixed query, which fires on a timer and would otherwise be the most common search
+in the table. `SiteVisits` stores the client IP whole (taken from `X-Forwarded-For`, since behind a load
+balancer `RemoteIpAddress` is the balancer) so it can be resolved at read time rather than at write time.
+
 ### 2.4 Zero-downtime reindex: staging → live swap
 
 A full rebuild never touches the live tables until the very end. The flow (see `AzdoIndexerService.RunMonthlyAsync` + `SchemaInitializer`):

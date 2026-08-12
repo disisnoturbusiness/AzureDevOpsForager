@@ -134,6 +134,50 @@ CREATE FULLTEXT INDEX ON dbo.CodeChunks
 KEY INDEX PK_CodeChunks ON CODEINDEX_FTC WITH (CHANGE_TRACKING AUTO);
 GO
 
+-- ---------------------------------------------------------------------------
+-- Telemetry. These two are the only tables the SERVER writes; everything above
+-- is written by the Indexer and only read by the Server.
+--
+-- Nothing here is engine-version sensitive: no VECTOR, no DiskANN, no full-text.
+-- Identical on SQL Server 2016+ and Azure SQL, and it still records on an engine
+-- where the vector step cannot run.
+--
+-- Grain differs between them on purpose. A visitor who runs twenty searches is
+-- ONE row in SiteVisits and twenty in UsageEvents, so do not count searches to
+-- count people.
+-- ---------------------------------------------------------------------------
+
+IF OBJECT_ID('dbo.UsageEvents','U') IS NULL
+CREATE TABLE dbo.UsageEvents (
+   Id           BIGINT IDENTITY(1,1) PRIMARY KEY,
+   OccurredUtc  DATETIME2(0)  NOT NULL CONSTRAINT DF_UsageEvents_OccurredUtc DEFAULT SYSUTCDATETIME(),
+   EventType    VARCHAR(16)   NOT NULL,   -- search | ask | feedback
+   Question     NVARCHAR(400) NULL,
+   ResultCount  INT           NULL,
+   DurationMs   INT           NULL,
+   Grounded     BIT           NULL,       -- ask: did retrieval return anything to ground on
+   Verdict      VARCHAR(4)    NULL,       -- feedback: UP | DOWN
+   TopSource    VARCHAR(16)   NULL        -- Hybrid | FullText | Vector - which leg won
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_UsageEvents_OccurredUtc' AND object_id=OBJECT_ID('dbo.UsageEvents'))
+   CREATE INDEX IX_UsageEvents_OccurredUtc ON dbo.UsageEvents(OccurredUtc DESC) INCLUDE (EventType, ResultCount);
+GO
+
+IF OBJECT_ID('dbo.SiteVisits','U') IS NULL
+CREATE TABLE dbo.SiteVisits (
+   Id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+   OccurredUtc DATETIME2(0) NOT NULL CONSTRAINT DF_SiteVisits_OccurredUtc DEFAULT SYSUTCDATETIME(),
+   ClientIp    VARCHAR(45)  NULL          -- stored whole so it can be resolved at read time; 45 fits IPv6
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SiteVisits_OccurredUtc' AND object_id=OBJECT_ID('dbo.SiteVisits'))
+   CREATE INDEX IX_SiteVisits_OccurredUtc ON dbo.SiteVisits(OccurredUtc DESC) INCLUDE (ClientIp);
+GO
+
 PRINT '=== Schema created: dbo.CodeFiles, dbo.CodeChunks + full-text indexes + b-tree indexes ===';
+PRINT '=== Telemetry created: dbo.UsageEvents, dbo.SiteVisits (also created automatically at server startup) ===';
 PRINT '=== Vector index is created by the indexer AFTER the first load (needs >=100 non-NULL vectors). ===';
 GO
