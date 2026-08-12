@@ -336,25 +336,39 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
       // failure is logged: a silently-missing proc drops the demo to keyword search with no visible signal.
       await TryExecAsync( connection, SearchCodeProcDdl, "dbo.SearchCode create" );
 
-      // Usage telemetry. Non-fatal by design: an index that cannot record its own usage is still a working
-      // index, so a failure here must never stop the app starting.
-      await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
+      await EnsureTelemetryTablesAsync( connection );
    }
 
    /// <summary>
-   /// Creates dbo.UsageEvents if it is missing, and nothing else.
+   /// Creates the telemetry tables if they are missing: dbo.UsageEvents and dbo.SiteVisits.
    /// <para>
-   /// Exists because <see cref="EnsureSchemaAsync"/> is called only by the Indexer — the Server has never
-   /// created schema, it only reads what the Indexer built. Usage telemetry is the first thing the Server
-   /// itself writes, so without this the table simply never exists in a deployment where the Indexer was
-   /// last run against a different machine, and every insert fails with "Invalid object name". Cheap and
-   /// idempotent, so it can run on every start.
+   /// This is the ONLY place either table is declared, and both entry points route through it —
+   /// <see cref="EnsureSchemaAsync"/> for anyone standing the tool up against their own SQL Server via the
+   /// Indexer, and the Server at startup because it is the process that writes them. That single-source
+   /// rule is the point: when these two lists were maintained separately, the Indexer path created
+   /// UsageEvents and not SiteVisits, so a fresh database got half the telemetry schema and the missing
+   /// half only showed up as inserts failing at runtime.
+   /// </para>
+   /// <para>
+   /// Deliberately non-fatal. An index that cannot record its own usage is still a working index, so
+   /// neither a missing permission nor an unexpected engine may stop indexing or stop the server booting.
+   /// </para>
+   /// <para>
+   /// Portable across SQL Server 2016+ and Azure SQL: BIGINT IDENTITY, DATETIME2, SYSUTCDATETIME(),
+   /// filtered-free b-tree indexes with INCLUDE, and OBJECT_ID guards are common to both. Nothing here
+   /// depends on the VECTOR/DiskANN features that make the main schema engine-version sensitive.
    /// </para>
    /// </summary>
-   public static async Task EnsureUsageTableAsync( string connectionString )
+   public static async Task EnsureTelemetryTablesAsync( string connectionString )
    {
       using var connection = new SqlConnection( connectionString );
       await connection.OpenAsync();
+      await EnsureTelemetryTablesAsync( connection );
+   }
+
+   /// <summary>Telemetry DDL against an already-open connection, so callers mid-transaction reuse it.</summary>
+   private static async Task EnsureTelemetryTablesAsync( SqlConnection connection )
+   {
       await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
       await TryExecAsync( connection, SiteVisitsDdl, "dbo.SiteVisits create" );
    }

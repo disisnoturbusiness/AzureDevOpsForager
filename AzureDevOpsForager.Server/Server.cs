@@ -463,8 +463,8 @@ public class Server
          {
             try
             {
-               await SchemaInitializer.EnsureUsageTableAsync( Config.SqlConnectionString );
-               Console.WriteLine( "[TELEMETRY] dbo.UsageEvents ready." );
+               await SchemaInitializer.EnsureTelemetryTablesAsync( Config.SqlConnectionString );
+               Console.WriteLine( "[TELEMETRY] dbo.UsageEvents + dbo.SiteVisits ready." );
             }
             catch( Exception exception )
             {
