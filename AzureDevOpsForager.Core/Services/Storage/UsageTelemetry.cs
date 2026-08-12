@@ -76,6 +76,51 @@ public static class UsageTelemetry
       } );
    }
 
+   /// <summary>
+   /// Records one site visit: the time, and the client IP as given. Called once per page load, never per
+   /// search — a visitor who runs twenty searches is one visit, not twenty.
+   /// <para>
+   /// The address is stored verbatim rather than hashed or truncated, because the whole point is to be
+   /// able to resolve it at read time. Application Insights already collects requests for this site and
+   /// zeroes client_IP to 0.0.0.0 before storing, keeping only a city guess — which on this deployment
+   /// resolved a Michigan visitor to Detroit, four hours from where they actually were. Geo derived from
+   /// an IP is not a substitute for the IP.
+   /// </para>
+   /// </summary>
+   /// <param name="clientIp">Client address, already extracted from X-Forwarded-For by the caller.</param>
+   public static void RecordVisit( string clientIp )
+   {
+      Fire( async connection =>
+      {
+         using var command = new SqlCommand(
+            "INSERT INTO dbo.SiteVisits (ClientIp) VALUES (@ip);", connection );
+
+         command.Parameters.AddWithValue( "@ip", (object)NormalizeIp( clientIp ) ?? DBNull.Value );
+
+         await command.ExecuteNonQueryAsync();
+      } );
+   }
+
+   /// <summary>
+   /// Takes the client address out of an X-Forwarded-For value. App Service puts the real caller first and
+   /// appends a source port ("203.0.113.7:51234"), and proxies in front may add further hops after a comma,
+   /// so the first entry is the one that matters. IPv6 is left intact — it contains colons of its own, so
+   /// the port is only stripped when exactly one colon is present.
+   /// </summary>
+   private static string NormalizeIp( string clientIp )
+   {
+      var text = ( clientIp ?? "" ).Trim();
+      if( text.Length == 0 )
+         return null;
+
+      var firstHop = text.Split( ',' )[0].Trim();
+      var colons = firstHop.Split( ':' ).Length - 1;
+      if( colons == 1 )
+         firstHop = firstHop.Substring( 0, firstHop.IndexOf( ':' ) );
+
+      return firstHop.Length > 45 ? firstHop.Substring( 0, 45 ) : firstHop;
+   }
+
    /// <summary>Records a thumbs up/down on an answer.</summary>
    /// <param name="helpful">True for thumbs up.</param>
    /// <param name="question">The question the verdict applies to.</param>

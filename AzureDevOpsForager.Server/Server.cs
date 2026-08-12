@@ -51,6 +51,8 @@ public class Server
 
       var app = BuildApplication( args, isService );
 
+      RecordSiteVisits( app );  // must precede the static-file middleware, which short-circuits "/"
+
       app.UseDefaultFiles();   // serve wwwroot/index.html at /
       app.UseStaticFiles();    // serve the self-contained web UI from wwwroot
 
@@ -69,6 +71,45 @@ public class Server
    #endregion
 
    #region Private Methods
+
+   /// <summary>
+   /// Records one row in dbo.SiteVisits per page load: the time and the caller's IP.
+   /// <para>
+   /// Deliberately hooked to the DOCUMENT request rather than to the API. A visit is an arrival, not an
+   /// action — someone who runs twenty searches is one visitor, and putting this on /query would both
+   /// bury that and mix per-arrival facts into the per-action usage table.
+   /// </para>
+   /// <para>
+   /// Runs before UseDefaultFiles/UseStaticFiles because those short-circuit the pipeline as soon as they
+   /// match "/", so anything registered after them never sees the request that matters. Only "/" and an
+   /// explicit "/index.html" count, which keeps css/js/favicon fetches from each logging a visit.
+   /// </para>
+   /// <para>
+   /// The real caller is in X-Forwarded-For: behind App Service's load balancer, RemoteIpAddress is the
+   /// balancer, so reading it alone would record the same infrastructure address for every visitor.
+   /// </para>
+   /// </summary>
+   /// <param name="app">The web application to insert the middleware into, ahead of static files.</param>
+   private static void RecordSiteVisits( WebApplication app )
+   {
+      app.Use( async ( context, next ) =>
+      {
+         var path = context.Request.Path.Value ?? "";
+         var isDocument = path == "/" || path.Equals( "/index.html", StringComparison.OrdinalIgnoreCase );
+
+         if( isDocument && HttpMethods.IsGet( context.Request.Method ) )
+         {
+            var forwarded = context.Request.Headers["X-Forwarded-For"].ToString();
+            var clientIp = string.IsNullOrWhiteSpace( forwarded )
+               ? context.Connection.RemoteIpAddress?.ToString()
+               : forwarded;
+
+            UsageTelemetry.RecordVisit( clientIp );
+         }
+
+         await next();
+      } );
+   }
 
    /// <summary>
    /// Writes the boxed startup banner to the console: product name, hosting mode, port, and

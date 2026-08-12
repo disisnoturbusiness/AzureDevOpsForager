@@ -356,7 +356,32 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
       using var connection = new SqlConnection( connectionString );
       await connection.OpenAsync();
       await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
+      await TryExecAsync( connection, SiteVisitsDdl, "dbo.SiteVisits create" );
    }
+
+   /// <summary>
+   /// One row per page load: when, and the client IP.
+   /// <para>
+   /// Separate from <c>dbo.UsageEvents</c> on purpose. Visits are a per-arrival fact and searches are a
+   /// per-action fact; mixing them means every usage query has to filter one out of the other, and a
+   /// visitor who runs twenty searches would otherwise look like twenty visitors.
+   /// </para>
+   /// <para>
+   /// The IP is stored whole and un-hashed because the point is to be able to resolve it later —
+   /// reverse DNS at read time, not at write time, so the lookup can be redone or skipped without
+   /// having lost the input. VARCHAR(45) fits a full IPv6 address.
+   /// </para>
+   /// </summary>
+   private static string SiteVisitsDdl => @"
+IF OBJECT_ID('dbo.SiteVisits','U') IS NULL
+CREATE TABLE dbo.SiteVisits (
+   Id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+   OccurredUtc DATETIME2(0) NOT NULL CONSTRAINT DF_SiteVisits_OccurredUtc DEFAULT SYSUTCDATETIME(),
+   ClientIp    VARCHAR(45)  NULL
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SiteVisits_OccurredUtc' AND object_id=OBJECT_ID('dbo.SiteVisits'))
+   CREATE INDEX IX_SiteVisits_OccurredUtc ON dbo.SiteVisits(OccurredUtc DESC) INCLUDE (ClientIp);
+";
 
    /// <summary>
    /// Usage telemetry: one row per search, answer, or feedback click.
