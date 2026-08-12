@@ -116,23 +116,45 @@ BEGIN
       (SELECT TOP (1) build_parameters FROM sys.vector_indexes WHERE object_id = OBJECT_ID('dbo.CodeChunks')),
       '$.Version') AS INT);
 
-   DECLARE @VectorSql NVARCHAR(MAX) = N'INSERT INTO #VectorHits (ChunkId, Distance) ' +
-      CASE WHEN ISNULL(@VectorIndexVersion, 3) >= 3 THEN N'
+   -- Two spellings of the same search. Which one PARSES depends on the DiskANN index build, and the build
+   -- does not always report a version: SQL Server 2025 on-prem writes build_parameters with StartId, L, M
+   -- and R but no Version key at all, while Azure SQL reports 3 or higher. A missing version therefore
+   -- means the OLDER spelling, not the newest. Defaulting the other way makes every self-hosted install
+   -- fail with Incorrect syntax near APPROXIMATE, which the caller catches and degrades to full-text --
+   -- so the headline feature quietly stops existing with nothing in the logs to say so.
+   DECLARE @ModernSql NVARCHAR(MAX) = N'INSERT INTO #VectorHits (ChunkId, Distance)
          SELECT TOP (200) WITH APPROXIMATE c.Id, vs.distance
          FROM VECTOR_SEARCH(TABLE = dbo.CodeChunks AS c, COLUMN = Embedding,
               SIMILAR_TO = @QueryVector, METRIC = ''cosine'') AS vs
          WHERE (@ChunkType IS NULL OR c.ChunkType = @ChunkType) AND vs.distance <= @MaxDistance
-         ORDER BY vs.distance'
-      ELSE N'
+         ORDER BY vs.distance';
+
+   DECLARE @LegacySql NVARCHAR(MAX) = N'INSERT INTO #VectorHits (ChunkId, Distance)
          SELECT TOP (200) c.Id, vs.distance
          FROM VECTOR_SEARCH(TABLE = dbo.CodeChunks AS c, COLUMN = Embedding,
               SIMILAR_TO = @QueryVector, METRIC = ''cosine'', TOP_N = 200) AS vs
          WHERE (@ChunkType IS NULL OR c.ChunkType = @ChunkType) AND vs.distance <= @MaxDistance
-         ORDER BY vs.distance' END;
+         ORDER BY vs.distance';
 
-   EXEC sp_executesql @VectorSql,
-        N'@QueryVector VECTOR({Config.EmbeddingDimension}), @ChunkType NVARCHAR(50), @MaxDistance FLOAT',
-        @QueryVector = @QueryVector, @ChunkType = @ChunkType, @MaxDistance = @MaxDistance;
+   DECLARE @VectorParams NVARCHAR(200) =
+      N'@QueryVector VECTOR({Config.EmbeddingDimension}), @ChunkType NVARCHAR(50), @MaxDistance FLOAT';
+
+   -- The version is only a hint for which to try FIRST. The authoritative test is whether the batch
+   -- parses on this engine, so the other spelling is the fallback: guessing is what broke it before.
+   DECLARE @FirstSql  NVARCHAR(MAX) = CASE WHEN ISNULL(@VectorIndexVersion, 0) >= 3 THEN @ModernSql ELSE @LegacySql END;
+   DECLARE @SecondSql NVARCHAR(MAX) = CASE WHEN ISNULL(@VectorIndexVersion, 0) >= 3 THEN @LegacySql ELSE @ModernSql END;
+
+   BEGIN TRY
+      EXEC sp_executesql @FirstSql, @VectorParams,
+           @QueryVector = @QueryVector, @ChunkType = @ChunkType, @MaxDistance = @MaxDistance;
+   END TRY
+   BEGIN CATCH
+      -- Only the unparseable-grammar case should land here; clear any partial insert and try the other
+      -- spelling. A genuine failure (no index, bad dimension) throws again and reaches the caller.
+      DELETE FROM #VectorHits;
+      EXEC sp_executesql @SecondSql, @VectorParams,
+           @QueryVector = @QueryVector, @ChunkType = @ChunkType, @MaxDistance = @MaxDistance;
+   END CATCH
 
    DECLARE @VectorResults TABLE (ChunkId INT, Distance FLOAT, VectorRank INT);
    INSERT INTO @VectorResults (ChunkId, Distance, VectorRank)
