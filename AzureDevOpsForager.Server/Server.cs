@@ -5,6 +5,7 @@ using AzureDevOpsForager.Core.Services.Chat;
 using AzureDevOpsForager.Core.Services.Embedding;
 using AzureDevOpsForager.Core.Services.Reranking;
 using AzureDevOpsForager.Core.Services.Search;
+using AzureDevOpsForager.Core.Services.Storage;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using System.Diagnostics;
@@ -471,7 +472,11 @@ public class Server
       {
          Console.WriteLine( $"[QUERY] {request.Question}" );
 
+         var stopwatch = Stopwatch.StartNew();
          var response = await search.SearchAsync( request );
+         stopwatch.Stop();
+
+         var resultCount = response.Ids?.FirstOrDefault()?.Count ?? 0;
 
          if( !string.IsNullOrEmpty( response.Error ) )
          {
@@ -479,7 +484,14 @@ public class Server
          }
          else
          {
-            Console.WriteLine( $"[RESULT] Found {response.Ids?.FirstOrDefault()?.Count ?? 0} results" );
+            Console.WriteLine( $"[RESULT] Found {resultCount} results" );
+
+            // Which leg won is worth a column: it is the cheapest available signal that the vector path is
+            // actually contributing. An all-FullText week means the headline feature has quietly died again.
+            var topSource = response.Metadatas?.FirstOrDefault()?.FirstOrDefault()
+               ?.TryGetValue( "match_source", out var source ) == true ? source : null;
+
+            UsageTelemetry.RecordQuery( "search", request.Question, resultCount, stopwatch.ElapsedMilliseconds, topSource: topSource );
          }
 
          return Results.Json( response );
@@ -544,6 +556,7 @@ public class Server
          if( !llmProvider.IsConfigured )
             return Results.Json( new { answer = "Chat is not configured — set the GROQ_API_KEY environment variable on the server.", sources = Array.Empty<string>() } );
 
+         var stopwatch = Stopwatch.StartNew();
          var searchResults = await search.SearchAsync( new SearchRequest { Question = request.Question, NResults = 8, ModuleFilter = request.ModuleFilter } );
          var contextBuilder = new System.Text.StringBuilder();
          var sources = new List<string>();
@@ -563,6 +576,13 @@ public class Server
          if( !GroundingGuard.HasGrounding( context ) )
          {
             Console.WriteLine( $"[CHAT] No grounding for \"{request.Question}\" — answering without a model call." );
+            stopwatch.Stop();
+
+            // Recorded with Grounded=0 rather than skipped. How often the corpus cannot answer a question
+            // people actually ask is the single most useful thing this table can tell you: a run of these
+            // is either a gap worth indexing or a gate that has drifted too tight.
+            UsageTelemetry.RecordQuery( "ask", request.Question, 0, stopwatch.ElapsedMilliseconds, grounded: false );
+
             return Results.Json( new
             {
                answer = GroundingGuard.NoGroundingAnswer,
@@ -572,6 +592,8 @@ public class Server
          }
 
          var answer = await llmProvider.AskAsync( request.Question, context );
+         stopwatch.Stop();
+         UsageTelemetry.RecordQuery( "ask", request.Question, sources.Count, stopwatch.ElapsedMilliseconds, grounded: true );
 
          // Return the retrieved hits in full, not just their file paths. The client renders an answer's
          // sources with the same card component the search results use — chunk name, type, match source,
@@ -597,9 +619,10 @@ public class Server
       {
          try
          {
-            var verdict = feedback.Helpful ? "UP" : "DOWN";
-            var sanitizedQuestion = ( feedback.Question ?? "" ).Replace( '\t', ' ' );
-            File.AppendAllText( "chat_feedback.log", $"{DateTime.UtcNow:o}\t{verdict}\t{sanitizedQuestion}{Environment.NewLine}" );
+            // Was File.AppendAllText to a relative path. On App Service Linux the container filesystem is
+            // recreated on every restart and deploy, so the feature appeared to collect feedback and in
+            // fact discarded it. Goes to the database the app already has open.
+            UsageTelemetry.RecordFeedback( feedback.Helpful, feedback.Question );
          }
          catch { }
          return Results.Json( new { ok = true } );
