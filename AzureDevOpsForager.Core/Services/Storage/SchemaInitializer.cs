@@ -335,7 +335,45 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
       // Still non-fatal (an engine without VECTOR support can't create it and should keep FTS-only), but the
       // failure is logged: a silently-missing proc drops the demo to keyword search with no visible signal.
       await TryExecAsync( connection, SearchCodeProcDdl, "dbo.SearchCode create" );
+
+      // Usage telemetry. Non-fatal by design: an index that cannot record its own usage is still a working
+      // index, so a failure here must never stop the app starting.
+      await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
    }
+
+   /// <summary>
+   /// Usage telemetry: one row per search, answer, or feedback click.
+   /// <para>
+   /// This lives in SQL rather than a file because the app runs on App Service Linux, whose container
+   /// filesystem is recreated on every restart and every deploy. The thumbs up/down feedback previously
+   /// appended to a relative-path log file, so it looked like it was being collected and was in fact
+   /// discarded within hours. The database is already open on the request path, so this adds a round-trip,
+   /// not a dependency.
+   /// </para>
+   /// <para>
+   /// Deliberately records NO client identifier — no IP address, no user agent, no cookie, no session id.
+   /// The question it needs to answer is "is anyone using this, and does it work for them", which is a
+   /// question about queries and outcomes, not about people. Storing nothing that identifies a visitor is
+   /// both the honest default for a public unauthenticated demo and the reason this needs no privacy
+   /// notice.
+   /// </para>
+   /// </summary>
+   private static string UsageEventsDdl => @"
+IF OBJECT_ID('dbo.UsageEvents','U') IS NULL
+CREATE TABLE dbo.UsageEvents (
+   Id           BIGINT IDENTITY(1,1) PRIMARY KEY,
+   OccurredUtc  DATETIME2(0)  NOT NULL CONSTRAINT DF_UsageEvents_OccurredUtc DEFAULT SYSUTCDATETIME(),
+   EventType    VARCHAR(16)   NOT NULL,   -- search | ask | feedback
+   Question     NVARCHAR(400) NULL,
+   ResultCount  INT           NULL,
+   DurationMs   INT           NULL,
+   Grounded     BIT           NULL,       -- ask: did retrieval return anything to ground on
+   Verdict      VARCHAR(4)    NULL,       -- feedback: UP | DOWN
+   TopSource    VARCHAR(16)   NULL        -- Hybrid | FullText | Vector - which leg won
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_UsageEvents_OccurredUtc' AND object_id=OBJECT_ID('dbo.UsageEvents'))
+   CREATE INDEX IX_UsageEvents_OccurredUtc ON dbo.UsageEvents(OccurredUtc DESC) INCLUDE (EventType, ResultCount);
+";
 
    /// <summary>
    /// DESTRUCTIVE: drop the vector index (if present) and delete all rows from both tables. This empties the
