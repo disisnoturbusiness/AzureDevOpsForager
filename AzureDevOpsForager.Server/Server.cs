@@ -61,7 +61,6 @@ public class Server
       Console.WriteLine();
 
       RegisterSqlWarmup( app );
-      RegisterHfWarmup( app );
 
       app.Run();
    }
@@ -417,42 +416,19 @@ public class Server
       } );
    }
 
-   /// <summary>
-   /// After the host is up, wakes the scale-to-zero Hugging Face endpoints in the background so the first real
-   /// query/chat does not pay their cold-start. Fires one embed and (when reranking is on) one rerank against
-   /// the live services. No-op when HF is not the backend (local ONNX has no cold-start). Best-effort: any
-   /// failure just means the endpoints warm on first use instead.
-   /// </summary>
-   /// <param name="app">The running web application whose ApplicationStarted event triggers the warm-up.</param>
-   private static void RegisterHfWarmup( WebApplication app )
-   {
-      if( !Config.HuggingFaceEnabled )
-         return;
-
-      app.Lifetime.ApplicationStarted.Register( () =>
-      {
-         _ = Task.Run( () =>
-         {
-            try
-            {
-               Console.WriteLine( "[HF WARMUP] Waking embed + rerank endpoints..." );
-               app.Services.GetService<IEmbedder>()?.EmbedQuery( "warmup" );
-
-               var reranker = app.Services.GetService<IReranker>();
-               if( reranker != null )
-               {
-                  var probe = new List<RerankerCandidate> { new RerankerCandidate( 0, "warm up a" ), new RerankerCandidate( 1, "warm up b" ) };
-                  reranker.RerankAsync( "warmup", probe, 1 ).GetAwaiter().GetResult();
-               }
-               Console.WriteLine( "[HF WARMUP] Endpoints warm." );
-            }
-            catch( Exception warmupException )
-            {
-               Console.WriteLine( $"[HF WARMUP] {warmupException.GetType().Name} — endpoints will warm on first query instead." );
-            }
-         } );
-      } );
-   }
+   // There used to be a RegisterHfWarmup here that woke the embed and rerank endpoints on
+   // ApplicationStarted, so the first visitor after a restart would not pay their cold start.
+   //
+   // It was removed because it fires on EVERY app start, and on this deployment the app restarts
+   // on every push to main and on every app-settings change. Each of those woke two A10Gs that
+   // then stayed billable for the full 30-minute idle window — around $1 per deploy, paid on days
+   // when the only person touching the site was the one deploying it. Eight deploys in a day is
+   // most of a day's GPU budget spent warming endpoints for nobody.
+   //
+   // The two warm-ups that remain are the ones tied to an actual person: the browser fires one on
+   // the visitor's first keystroke, and SearchAsync calls StartRerankerWarmup so the rerank cold
+   // start overlaps the embed cold start rather than following it. A restart with no visitor now
+   // costs nothing, which is the common case.
 
    /// <summary>
    /// Wires up every HTTP endpoint on the application. Grouped by concern (health, search,
