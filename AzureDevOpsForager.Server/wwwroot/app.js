@@ -657,16 +657,31 @@
   // without the visibility gate one pinned tab bills the HF endpoints around the clock.
   // ===================================================================
   const HEARTBEAT_MS = 10 * 60 * 1000; // 10 minutes
+  const IDLE_CUTOFF_MS = 30 * 60 * 1000; // stop beating after this long with no interaction
   let heartbeatBusy = false;
   let lastBeatAt = 0;
+  let lastInteractionAt = 0;
 
   function tabVisible() {
     return document.visibilityState === "visible";
   }
 
+  // "Visible" is not the same as "someone is using this", and the difference costs real money:
+  // two A10Gs at $1/h each stay alive for as long as the beats keep landing. A tab parked on a
+  // second monitor, or left open overnight, reports visibilityState "visible" indefinitely and
+  // billed ~11 hours per endpoint in a single night. So the beat now needs recent human input,
+  // not just a foreground tab. Starts at 0 deliberately: a page nobody has touched never warms
+  // anything, which also means crawlers and link-preview fetchers cost nothing.
+  function noteInteraction() {
+    lastInteractionAt = Date.now();
+  }
+  ["keydown", "pointerdown", "wheel"].forEach( evt =>
+    document.addEventListener( evt, noteInteraction, { passive: true } ) );
+
   async function heartbeat() {
     if (heartbeatBusy) return;              // don't stack pings if one runs long (cold start)
     if (!tabVisible()) return;              // nobody's looking — let the backend cool down
+    if (Date.now() - lastInteractionAt > IDLE_CUTOFF_MS) return;   // open, but abandoned
     heartbeatBusy = true;
     lastBeatAt = Date.now();
     healthText.textContent = "keeping warm…";
@@ -702,7 +717,11 @@
   //
   // "keydown" rather than "input" so it also fires for the paste-and-Enter case, and the
   // { once: true } means this costs exactly one listener invocation per page view.
+  // noteInteraction() first: this listener is on the input, so it runs before the document-level
+  // one during bubbling, and heartbeat() would otherwise see lastInteractionAt still at 0 and
+  // decline the very beat this exists to fire.
   searchInput.addEventListener("keydown", () => {
+    noteInteraction();
     if (Date.now() - lastBeatAt >= HEARTBEAT_MS) heartbeat();
   }, { once: true });
 
