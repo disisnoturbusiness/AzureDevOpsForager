@@ -157,6 +157,28 @@ public static class Config
    /// call, and because reranking is fail-soft the only symptom is degraded ordering rather than an
    /// error. Readable from RERANKER_MODEL_NAME so the pair can be swapped together as settings.
    /// </remarks>
+   /// <summary>
+   /// Wire format the hosted rerank endpoint speaks. "jina" (default) is the vLLM/TEI shape —
+   /// <c>POST {url}/rerank</c> with <c>{model, query, documents, top_n}</c>. "toolkit" is HF's stock
+   /// Inference Toolkit container — <c>POST {url}</c> with <c>{query, texts}</c> and no model name.
+   /// <para>
+   /// This exists because the same model can be served by either, and which one you pick is almost entirely
+   /// a cold-start decision rather than a quality one: measured on this deployment, vLLM takes 64 s inside
+   /// the container before it is ready (36 s of imports, 21 s of torch.compile) where the toolkit takes 5 s
+   /// and loads the pipeline in 890 ms. End to end that is ~94 s against ~31 s off a scale-to-zero wake.
+   /// </para>
+   /// <para>
+   /// Scores should be unaffected, because the Qwen3 chat template is applied client-side either way,
+   /// matching the model card's reference CrossEncoder usage exactly — the server is never asked to format
+   /// anything. "Should" is doing real work in that sentence: verify against a recorded baseline before
+   /// trusting it, because the relevance gate's thresholds are calibrated against the score distribution
+   /// and a silent shift there is the failure mode this codebase has already paid for twice.
+   /// </para>
+   /// Settable via RERANKER_API_FORMAT.
+   /// </summary>
+   public static string RerankerApiFormat { get; set; } =
+      System.Environment.GetEnvironmentVariable( "RERANKER_API_FORMAT" ) ?? "jina";
+
    public static string RerankerModelName { get; set; } =
       System.Environment.GetEnvironmentVariable( "RERANKER_MODEL_NAME" ) ?? "tomaarsen/Qwen3-Reranker-0.6B-seq-cls";
 

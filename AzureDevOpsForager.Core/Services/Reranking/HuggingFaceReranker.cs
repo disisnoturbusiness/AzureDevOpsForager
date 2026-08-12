@@ -46,17 +46,38 @@ public class HuggingFaceReranker : IReranker
    /// <summary>Shared client pre-loaded with the bearer Authorization header and a request timeout.</summary>
    private readonly HttpClient _httpClient;
 
-   /// <summary>The endpoint's /rerank route (base URL + "/rerank").</summary>
+   /// <summary>The URL requests are POSTed to: base + "/rerank" for Jina-style servers, base itself for the toolkit.</summary>
    private readonly string _rerankUrl;
+
+   /// <summary>
+   /// True when the endpoint is HF's stock Inference Toolkit container rather than vLLM/TEI. The two speak
+   /// different wire formats for the same job: vLLM exposes a Jina-style
+   /// <c>POST /rerank {model, query, documents, top_n}</c>, while the toolkit exposes
+   /// <c>POST / {query, texts}</c> and ignores a model name entirely.
+   /// <para>
+   /// Only the envelope differs. Both are handed the SAME pre-wrapped strings — the Qwen3 chat template is
+   /// applied here, client-side, exactly as the model card's reference CrossEncoder usage does it
+   /// (<c>format_queries</c> / <c>format_document</c>), so neither server is asked to format anything. That
+   /// is what makes the two comparable, and it is the reason a swap does not silently move the scores the
+   /// relevance gate is calibrated against.
+   /// </para>
+   /// </summary>
+   private readonly bool _useToolkitFormat;
 
    #endregion
 
    #region Constructor
 
-   /// <summary>Creates a reranker bound to a HF endpoint URL and bearer token; appends the /rerank route.</summary>
+   /// <summary>
+   /// Creates a reranker bound to a HF endpoint URL and bearer token. The route and request envelope depend
+   /// on <see cref="Config.RerankerApiFormat"/>: "toolkit" posts to the base URL, anything else appends
+   /// "/rerank".
+   /// </summary>
    public HuggingFaceReranker( string endpointUrl, string token )
    {
-      _rerankUrl = ( endpointUrl?.TrimEnd( '/' ) ?? "" ) + "/rerank";
+      _useToolkitFormat = string.Equals( Config.RerankerApiFormat, "toolkit", StringComparison.OrdinalIgnoreCase );
+      var baseUrl = endpointUrl?.TrimEnd( '/' ) ?? "";
+      _rerankUrl = _useToolkitFormat ? baseUrl : baseUrl + "/rerank";
       _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes( 2 ) };
       if( !string.IsNullOrWhiteSpace( token ) )
          _httpClient.DefaultRequestHeaders.Add( "Authorization", "Bearer " + token );
@@ -82,13 +103,15 @@ public class HuggingFaceReranker : IReranker
       {
          var wrappedQuery = PromptPrefix + $"<Instruct>: {Config.RerankerInstruction}\n<Query>: {query ?? ""}\n";
          var documents = candidates.Select( candidate => $"<Document>: {candidate.Preview ?? ""}" + PromptSuffix ).ToList();
-         var payload = JsonConvert.SerializeObject( new
-         {
-            model = Config.RerankerModelName,
-            query = wrappedQuery,
-            documents,
-            top_n = candidates.Count
-         } );
+         var payload = _useToolkitFormat
+            ? JsonConvert.SerializeObject( new { query = wrappedQuery, texts = documents } )
+            : JsonConvert.SerializeObject( new
+            {
+               model = Config.RerankerModelName,
+               query = wrappedQuery,
+               documents,
+               top_n = candidates.Count
+            } );
          var body = await PostWithWarmupRetryAsync( payload, cancellationToken );
 
          var scored = ParseScores( body, candidates );
