@@ -691,6 +691,21 @@
     if (tabVisible() && Date.now() - lastBeatAt >= HEARTBEAT_MS) heartbeat();
   });
 
+  // The first beat used to be one full interval away, so a visitor arriving at a cold backend
+  // got no warming at all while they read the page — the wake only started when they pressed
+  // Search, and they watched the whole 90+ seconds of it. Their first keystroke says they
+  // intend to search, so start the wake then and let it overlap the rest of their typing.
+  //
+  // Keyed on typing rather than page load on purpose: the boot code calls searchInput.focus(),
+  // so a load- or focus-triggered warm would fire for crawlers and link previews too, and each
+  // one of those spins up two A10Gs for the full idle window. A keystroke is a person.
+  //
+  // "keydown" rather than "input" so it also fires for the paste-and-Enter case, and the
+  // { once: true } means this costs exactly one listener invocation per page view.
+  searchInput.addEventListener("keydown", () => {
+    if (Date.now() - lastBeatAt >= HEARTBEAT_MS) heartbeat();
+  }, { once: true });
+
   // ===================================================================
   // boot
   // ===================================================================
