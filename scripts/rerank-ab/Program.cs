@@ -67,9 +67,11 @@ internal static class Program
       var configPath = args.Length > 1 ? args[1] : @"C:\Temp\ForClaude\AzureDevOpsForager\config.local-e5.json";
       Config.LoadFromFile( configPath );
 
-      var candPath   = Path.Combine( OutDir, "rerank-candidates.json" );
-      var hostedPath = Path.Combine( OutDir, "rerank-hosted.json" );
-      var localPath  = Path.Combine( OutDir, "rerank-local.json" );
+      // A suffix keeps profiles apart: "" is the hybrid shortlist, "-fts" the full-text-only one.
+      var suffix     = Environment.GetEnvironmentVariable( "RERANKAB_SUFFIX" ) ?? "";
+      var candPath   = Path.Combine( OutDir, $"rerank-candidates{suffix}.json" );
+      var hostedPath = Path.Combine( OutDir, $"rerank-hosted{suffix}.json" );
+      var localPath  = Path.Combine( OutDir, $"rerank-local{suffix}.json" );
 
       if( stage == "candidates" || stage == "all" )
          BuildCandidates( candPath );
@@ -90,6 +92,11 @@ internal static class Program
    private static void BuildCandidates( string path )
    {
       const int pool = 30;
+      // RERANKAB_VW=0 removes the vector leg entirely, leaving a pure full-text shortlist. That
+      // answers whether the embedder earns its place in the pipeline at all, since a cross-encoder
+      // never reads a vector and only needs candidates from somewhere.
+      var vw = int.TryParse( Environment.GetEnvironmentVariable( "RERANKAB_VW" ), out var vwEnv ) ? vwEnv : 60;
+      Console.WriteLine( $"first-stage vector weight = {vw}" );
       var embedder = new EmbeddingService();
       var sets = new List<QSet>();
 
@@ -104,12 +111,13 @@ internal static class Program
          using var command = new SqlCommand( $@"
 DECLARE @qv VECTOR({Config.EmbeddingDimension}) = CAST(@vecjson AS VECTOR({Config.EmbeddingDimension}));
 EXEC dbo.SearchCode @SearchText=@txt, @QueryVector=@qv, @TopN=@top, @ChunkType=NULL,
-                    @VectorWeight=60, @ChunkFtsWeight=30, @FileFtsWeight=30,
+                    @VectorWeight=@vw, @ChunkFtsWeight=30, @FileFtsWeight=30,
                     @MinFtsRank=10, @MaxDistance=2.0;", connection );
          command.CommandTimeout = 180;
          command.Parameters.AddWithValue( "@vecjson", json );
          command.Parameters.AddWithValue( "@txt", question );
          command.Parameters.AddWithValue( "@top", pool );
+         command.Parameters.AddWithValue( "@vw", vw );
 
          var candidates = new List<Cand>();
          using( var reader = command.ExecuteReader() )

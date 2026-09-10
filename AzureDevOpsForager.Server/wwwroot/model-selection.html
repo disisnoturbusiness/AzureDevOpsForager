@@ -451,6 +451,61 @@
       about either model.
     </p>
 
+    <h3 style="margin-top:1.4rem">Experiment 4: does the embedder earn its place at all?</h3>
+
+    <p>
+      A cross-encoder never reads a vector. It reads the query and the document text together, so what it
+      needs is a <em>candidate list</em>, not embeddings. Full-text search can produce one. That makes
+      &ldquo;full-text, then rerank&rdquo; a complete architecture with no embedding model, no vector
+      column, no index, and no reindex when models change. Given Experiment 3, that deserved a measurement
+      rather than an assumption.
+    </p>
+
+    <p>
+      Same reranker on both sides. The only difference is how the shortlist was built.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>First stage</th><th>Answer in shortlist</th><th>rank 1</th><th>top 5</th><th>MRR</th></tr></thead>
+        <tbody>
+          <tr><td class="win">hybrid (vector + full-text)</td><td class="num win">13 of 18</td><td class="num">9</td><td class="num win">13</td><td class="num">0.557</td></tr>
+          <tr><td>full-text only, no embedder</td><td class="num">10 of 18</td><td class="num">9</td><td class="num">10</td><td class="num">0.519</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>The embedder contributes recall, and nothing else.</strong> Where full-text finds the answer
+      but buries it, the reranker erases the difference completely:
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Expected answer</th><th>hybrid first stage</th><th>full-text first stage</th><th>final rank, both</th></tr></thead>
+        <tbody>
+          <tr><td>EmptyBasketOnCheckoutException.cs</td><td class="num">8</td><td class="num">19</td><td class="num win">1</td></tr>
+          <tr><td>ImageValidators.cs</td><td class="num">6</td><td class="num">25</td><td class="num win">1</td></tr>
+          <tr><td>ExceptionMiddleware.cs</td><td class="num">5</td><td class="num">22</td><td class="num win">1</td></tr>
+          <tr><td>Register.cshtml.cs</td><td class="num">2</td><td class="num">27</td><td class="num">3</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Rank 25 out of retrieval, rank 1 after reranking, identical to the hybrid run that started at 6. So
+      the embedder is not improving the <em>ordering</em> of anything once a strong cross-encoder is in
+      play. What it does is put three answers in front of the reranker that full-text never surfaces at
+      all: IdentityTokenClaimService.cs, GetMyOrdersHandler.cs and CatalogFilterPaginatedSpecification.cs.
+      Those are pure recall, and no reranker recovers a document it was never shown.
+    </p>
+
+    <p>
+      The honest trade, then: the embedding endpoint buys about 17% more answerable questions and zero
+      ranking improvement. That is a real gain and a real cost, and which way it goes depends on the
+      corpus and the budget rather than on anything a benchmark table can tell you.
+    </p>
+
     <h2>What this evidence does not support</h2>
 
     <div class="card caveat">

@@ -334,3 +334,60 @@ either model.
     scripts/rerank-ab/    candidates -> hosted -> local -> report
 
 Raw output is in `rerank-candidates.json`, `rerank-hosted.json` and `rerank-local.json`.
+
+---
+
+# Does the embedder earn its place? (2026-09-10)
+
+A cross-encoder never reads a vector: it reads the query and the document text together. What it
+needs is a candidate list, not embeddings, and full-text search can produce one. So `FTS -> rerank`
+is a complete architecture with no embedding model, no vector column, no DiskANN index and no
+reindex when a model changes. After the reranker result above, that deserved measuring.
+
+Same reranker (Qwen3-Reranker-0.6B) on both sides. The only variable is how the shortlist was
+built: `@VectorWeight=60` against `@VectorWeight=0`, everything else identical.
+
+| first stage | answer in shortlist | rank 1 | top 5 | MRR |
+|---|---|---|---|---|
+| hybrid (vector + full-text) | **13 of 18** | 9 | **13** | 0.557 |
+| full-text only, no embedder | 10 of 18 | 9 | 10 | 0.519 |
+
+## The embedder contributes recall and nothing else
+
+Where full-text finds the answer but buries it, the reranker erases the difference entirely:
+
+| expected answer | hybrid first stage | FTS first stage | final rank, both |
+|---|---|---|---|
+| EmptyBasketOnCheckoutException.cs | 8 | 19 | 1 |
+| ImageValidators.cs | 6 | 25 | 1 |
+| ExceptionMiddleware.cs | 5 | 22 | 1 |
+| Register.cshtml.cs | 2 | 27 | 3 |
+
+Rank 25 out of retrieval and rank 1 after reranking, identical to a hybrid run that started at 6.
+The embedder is not improving the ordering of anything once a strong cross-encoder is present.
+
+What it does is put three answers in front of the reranker that full-text never surfaces:
+
+    IdentityTokenClaimService.cs             hybrid final rank 5
+    GetMyOrdersHandler.cs                    hybrid final rank 4
+    CatalogFilterPaginatedSpecification.cs   hybrid final rank 4
+
+Pure recall. No reranker recovers a document it was never shown.
+
+## The trade
+
+The embedding endpoint buys roughly 17% more answerable questions and zero ranking improvement.
+Whether that is worth the hosting line item depends on the corpus and the budget, not on a
+benchmark. On a corpus with more shared vocabulary between questions and code, full-text would
+close more of that gap; on one with less, the embedder would matter more.
+
+Note also that rank-1 count is identical at 9 either way. The three questions the embedder rescues
+land at 5, 4 and 4, which is why MRR moves so little (0.557 against 0.519) while top-5 moves by
+three whole questions. Report both or the effect is easy to overstate in either direction.
+
+## Reproducing
+
+    RERANKAB_SUFFIX=-fts RERANKAB_VW=0  scripts/rerank-ab  candidates
+    RERANKAB_SUFFIX=-fts                scripts/rerank-ab  hosted
+
+Raw output in `rerank-candidates-fts.json` and `rerank-hosted-fts.json`.
