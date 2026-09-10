@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Benchmarks — Azure DevOps Forager</title>
+  <meta name="description" content="Published benchmark figures for the embedding and reranking models considered for Azure DevOps Forager, with licenses, serving costs, and a comparison against what was actually measured on this corpus. By Dan Weaver." />
+  <meta name="author" content="Dan Weaver" />
+  <link rel="canonical" href="https://azuredevops.aidataforager.com/benchmarks.html" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
+  <style>
+    .doc { max-width: 900px; margin: 0 auto; padding: 0 20px 72px; }
+    .doc h2 { font-size: 1.35rem; margin: 2.4rem 0 .6rem; letter-spacing: -0.01em; }
+    .doc h3 { font-size: 1.02rem; margin: 1.7rem 0 .5rem; color: var(--acc); letter-spacing: .01em; }
+    .doc p, .doc li { line-height: 1.65; }
+    .doc ul { padding-left: 1.15rem; }
+    .doc li { margin: .3rem 0; }
+    .lede { font-size: 1.06rem; opacity: .92; border-left: 3px solid var(--acc);
+            padding: .1rem 0 .1rem 1rem; margin: 1.2rem 0 1.8rem; }
+    .card { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--radius); padding: 1.1rem 1.25rem; margin: 1.2rem 0;
+            box-shadow: var(--shadow); }
+    .card.flag { border-color: var(--acc); border-left-width: 3px; }
+    .card.caveat { border-color: var(--amber); border-left-width: 3px; }
+    .tbl-wrap { overflow-x: auto; margin: 1rem 0; }
+    table.ev { width: 100%; border-collapse: collapse; font-size: .92rem; min-width: 520px; }
+    table.ev th, table.ev td { text-align: left; padding: .5rem .7rem;
+                               border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.ev th { color: var(--cyan); font-weight: 600; white-space: nowrap; }
+    table.ev td.num { font-family: var(--font-mono); white-space: nowrap; }
+    .win { color: var(--acc); font-weight: 600; }
+    .lose { color: var(--amber); }
+    .kill { opacity: .62; }
+    code, .mono { font-family: var(--font-mono); font-size: .9em; }
+    .bigstat { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.2rem 0; }
+    .bigstat > div { flex: 1 1 170px; background: var(--surface); border: 1px solid var(--line);
+                     border-radius: var(--radius-sm); padding: .85rem 1rem; }
+    .bigstat b { display: block; font-family: var(--font-mono); font-size: 1.5rem;
+                 color: var(--acc); line-height: 1.15; }
+    .bigstat span { font-size: .82rem; opacity: .78; }
+    .backlink { display: inline-block; margin: 1.4rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <h1><span class="accent">Benchmarks</span></h1>
+        <p class="tagline">Published figures for every model considered &middot; and how they held up when measured</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="topbar-link" href="/">&larr; Back to search</a>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle light / dark theme" aria-label="Switch to light theme">☀</button>
+    </div>
+  </header>
+
+  <main class="doc">
+
+    <p class="lede">
+      These are <strong>published third-party benchmark figures</strong>, not measurements taken on this
+      system. They are what the model choices were originally made from. What happened when those choices
+      were actually tested against this corpus is a different page, and the two disagree in places:
+      <a href="/model-selection.html">how the models were chosen</a>.
+    </p>
+
+    <h2>Rerankers</h2>
+
+    <p>
+      Cross-encoders scored on code retrieval. MTEB-Code is rerank-top-100; CoIR is the code information
+      retrieval benchmark. License matters as much as score here: three of the strongest models are
+      CC-BY-NC and therefore unusable in a commercial product.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Model</th><th>Params</th><th>MTEB-Code</th><th>CoIR</th><th>License</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr><td>Qwen3-Reranker-8B</td><td class="num">8B</td><td class="num">81.22</td><td class="num">&mdash;</td><td>Apache-2.0</td><td>+0.02 over the 4B for roughly double the GPU cost &mdash; rejected</td></tr>
+          <tr class="kill"><td>Qwen3-Reranker-4B</td><td class="num">4B</td><td class="num">81.20</td><td class="num">&mdash;</td><td>Apache-2.0</td><td>chosen on paper; ~4% better and ~125% slower in practice, <strong>never deployed</strong></td></tr>
+          <tr><td class="win">Qwen3-Reranker-0.6B</td><td class="num">0.6B</td><td class="num">73.42</td><td class="num win">65.18</td><td>Apache-2.0</td><td class="win">deployed</td></tr>
+          <tr><td>mxbai-rerank-base-v2</td><td class="num">0.5B</td><td class="num">&mdash;</td><td class="num">65.71</td><td>Apache-2.0</td><td>roughly a tie with the 0.6B; kept as a second A/B arm</td></tr>
+          <tr><td class="lose">bge-reranker-v2-m3 <em>(incumbent)</em></td><td class="num">0.57B</td><td class="num">41.38</td><td class="num">35.97</td><td>Apache-2.0</td><td class="lose">replaced</td></tr>
+          <tr class="kill"><td>jina-reranker-v3</td><td class="num">&mdash;</td><td class="num">&mdash;</td><td class="num">63.28</td><td><strong>CC-BY-NC</strong></td><td>license-blocked</td></tr>
+          <tr class="kill"><td>jina-reranker-v2</td><td class="num">&mdash;</td><td class="num">&mdash;</td><td class="num">56.14</td><td><strong>CC-BY-NC</strong></td><td>license-blocked</td></tr>
+          <tr class="kill"><td>zerank-2</td><td class="num">4B</td><td class="num">nDCG@10 0.6528</td><td class="num">&mdash;</td><td><strong>CC-BY-NC</strong></td><td>license-blocked</td></tr>
+          <tr class="kill"><td>zerank-1-small</td><td class="num">1.7B</td><td class="num">&mdash;</td><td class="num">&mdash;</td><td>Apache-2.0</td><td>roughly 3&times; the serving cost</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The benchmark that was thrown out</h2>
+
+    <p>
+      A vendor page cited a single headline figure implying a large general-purpose win. Splitting it by
+      benchmark family shows the gap is real but <em>only on code</em>, and that the incumbent is actually
+      the stronger model on multilingual retrieval:
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Benchmark family</th><th>Qwen3-Reranker-0.6B</th><th>bge-reranker-v2-m3</th><th>Read</th></tr></thead>
+        <tbody>
+          <tr><td>CoIR &mdash; code</td><td class="num win">65.18</td><td class="num">36.28</td><td class="win">~29 point code gap, real</td></tr>
+          <tr><td>BEIR &mdash; general text</td><td class="num">56.28</td><td class="num">56.51</td><td>parity</td></tr>
+          <tr><td>MIRACL &mdash; multilingual</td><td class="num">57.70</td><td class="num win">69.32</td><td>incumbent wins outright</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The CoIR figures were taken from <strong>arXiv 2509.25085v3, Table 2</strong> &mdash; the
+      jina-reranker-v3 paper, a rival lab &mdash; rather than from either model's own marketing, so neither
+      vendor is grading its own homework.
+    </p>
+
+    <h2>Embedders</h2>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Model</th><th>Dims</th><th>Code benchmark</th><th>License</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr><td class="win">bge-code-v1</td><td class="num">1536</td><td class="num win">CoIR ~81.8</td><td>Apache-2.0</td><td class="win">hosted path; Qwen2.5-Coder-1.5B backbone, 32k context</td></tr>
+          <tr><td>e5-large-v2 <em>(general text)</em></td><td class="num">1024</td><td class="num">&mdash;</td><td>MIT</td><td>local ONNX path; no GPU, no API cost</td></tr>
+          <tr class="kill"><td>Qwen3-Embedding-4B</td><td class="num">2560</td><td class="num">MTEB-Code ~80.06</td><td>Apache-2.0</td><td>rejected on a schema limit, not quality &mdash; see below</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Qwen3-Embedding-4B was ruled out because <strong>2560 dimensions exceeds SQL Server's
+      <code>VECTOR(n)</code> ceiling of roughly 1998</strong>. Using it would have meant truncating to 1536
+      or 1024 and losing quality anyway, at around 2.5&times; the serving cost for comparable code
+      retrieval. A storage constraint decided that one, not a leaderboard.
+    </p>
+
+    <h2>What the serving hardware costs</h2>
+
+    <p>
+      Benchmarks say nothing about the bill. Scale-to-zero is what makes a demo affordable: these are
+      per-hour rates while an endpoint is actually awake.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>GPU</th><th>VRAM</th><th>$/hr</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>CPU</td><td class="num">&mdash;</td><td class="num">0.03 &ndash; 0.54</td><td>viable for the local ONNX path only</td></tr>
+          <tr><td>T4 &times;1</td><td class="num">16 GB</td><td class="num">0.50</td><td>ruled out: experimental Turing image, Flash-Attention precision problems</td></tr>
+          <tr><td>L4 &times;1</td><td class="num">24 GB</td><td class="num">0.80</td><td>fits, but roughly half the memory bandwidth</td></tr>
+          <tr><td class="win">A10G &times;1</td><td class="num">24 GB</td><td class="num win">1.00</td><td class="win">chosen &mdash; ~2&times; the bandwidth of the L4 for $0.20/hr</td></tr>
+          <tr><td>L40S &times;1</td><td class="num">48 GB</td><td class="num">1.80</td><td>unnecessary at this model size</td></tr>
+          <tr><td>A100 &times;1</td><td class="num">80 GB</td><td class="num">2.50</td><td>unnecessary at this model size</td></tr>
+          <tr><td>H200 &times;1</td><td class="num">141 GB</td><td class="num">5.00</td><td>unnecessary at this model size</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>How well these predicted reality</h2>
+
+    <p>
+      Every figure above is someone else's measurement on someone else's corpus. Four experiments were
+      later run on <em>this</em> one, and the benchmarks turned out to be a good guide in one case and a
+      poor one in another.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>What the benchmarks predicted</th><th>What measurement found</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Qwen3-Reranker-0.6B should beat bge-reranker-v2-m3 substantially on code &mdash; a 29 point CoIR gap.</td>
+            <td>On identical shortlists it won 6 questions to 2 and lifted MRR from 0.618 to 0.772.</td>
+            <td class="win">held up</td>
+          </tr>
+          <tr>
+            <td>bge-code-v1 is state of the art for code retrieval at CoIR ~81.8, so it should clearly beat a general-purpose text embedder.</td>
+            <td>It won 4 of 6 hard questions but made <strong>none of them retrievable</strong>, and was far worse on both controls &mdash; rank 1 became rank 124.</td>
+            <td class="lose">did not transfer</td>
+          </tr>
+          <tr>
+            <td>A bigger reranker is a better reranker: the 4B outscores the 0.6B by ~8 MTEB-Code points.</td>
+            <td>The 4B measured ~4% better and ~125% slower on this workload, so the 0.6B was deployed instead.</td>
+            <td>true but not worth it</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The pattern is that <strong>benchmarks predicted the reranker ranking well and the embedder ranking
+      badly</strong>. A leaderboard is a reasonable starting filter and a poor substitute for measuring your
+      own corpus. The measurements, including the two experiments that disproved what was assumed going in,
+      are on <a href="/model-selection.html">how the models were chosen</a>.
+    </p>
+
+    <a class="backlink" href="/model-selection.html">See what was actually measured &rarr;</a>
+
+  </main>
+
+  <footer class="foot">
+    <p class="foot-about">Hybrid semantic code search over Azure DevOps, Git &amp; GitHub — SQL Server 2025 native vectors + cross-encoder reranking.</p>
+    <span>SQL Server 2025 / Azure SQL &middot; bge-code-v1 code embeddings (1536-dim) &middot; RRF hybrid fusion &middot; Qwen3-Reranker-0.6B</span>
+    <p class="foot-built">
+      Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; remote
+    </p>
+    <p class="foot-links">
+      <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">Source on GitHub</a>
+      &middot;
+      <a href="https://www.linkedin.com/in/dan-weaver-1861038" target="_blank" rel="noopener">LinkedIn</a>
+      &middot;
+      <a href="https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx" target="_blank" rel="noopener">Hugging Face</a>
+      &middot;
+      <a href="mailto:disisnoturbusiness@gmail.com">Email</a>
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var KEY = "adf-theme";
+      var btn = document.getElementById("themeToggle");
+      function apply(t) {
+        var light = (t === "light");
+        if (light) document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        if (btn) {
+          btn.textContent = light ? "☾" : "☀";
+          btn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+      try { apply(localStorage.getItem(KEY) || "dark"); } catch (e) { apply("dark"); }
+      if (btn) btn.addEventListener("click", function () {
+        var next;
+        try { next = (localStorage.getItem(KEY) === "light") ? "dark" : "light"; } catch (e) { next = "dark"; }
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    })();
+  </script>
+</body>
+</html>
