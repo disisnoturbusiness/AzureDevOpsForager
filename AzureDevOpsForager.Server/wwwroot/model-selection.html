@@ -133,11 +133,24 @@
       </p>
     </div>
 
-    <h2>What it actually retrieves</h2>
+    <h2>What the demo showed, and why it was not a test</h2>
+
+    <div class="card caveat">
+      <p style="margin:0">
+        <strong>Correction.</strong> This section previously said there was &ldquo;no keyword overlap
+        engineered in.&rdquo; That was wrong. Every one of these six questions contains a word that appears
+        in its own answer&rsquo;s filename &mdash; <em>send <strong>email</strong></em> against
+        <code>EmailSender.cs</code>, <em>the <strong>basket</strong> total</em> against
+        <code>Basket.cs</code>. Plain keyword matching can win them with no embedding model involved, so
+        they show the system works end to end but prove nothing about retrieval quality. Noticing that is
+        what prompted <a href="#measured">the experiments below</a> and a question set built to
+        discriminate instead.
+      </p>
+    </div>
 
     <p>
-      Six plain-English questions, fired at the live index — 254 files, 605 chunks, health green. No keyword
-      overlap engineered in; these are questions phrased the way someone would actually ask them.
+      Six plain-English questions fired at the live index &mdash; 254 files, 605 chunks, health green. Kept
+      here because they are what the demo actually showed, including the one it got wrong.
     </p>
 
     <div class="tbl-wrap">
