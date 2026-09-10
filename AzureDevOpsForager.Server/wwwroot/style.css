@@ -1,4 +1,4 @@
-/* ===================================================================
+﻿/* ===================================================================
    Azure DevOps Forager — terminal-luxe dark theme
    100% self-contained: no web fonts, no CDN, no remote assets.
    =================================================================== */
@@ -326,6 +326,22 @@ body::after {
   box-shadow: 0 0 0 3px var(--acc-soft);
 }
 .ctl select { cursor: pointer; }
+
+/* Link sitting under the search controls; sized to match the control text. */
+.under-search {
+  margin: 0.7rem 0 0;
+  padding-left: 0.15rem;
+}
+.under-search a {
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--acc);
+  text-decoration: none;
+}
+.under-search a:hover,
+.under-search a:focus-visible { text-decoration: underline; }
+
 
 /* ---------- buttons ---------- */
 .btn {
