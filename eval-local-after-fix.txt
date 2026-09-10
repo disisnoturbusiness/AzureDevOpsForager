@@ -1,0 +1,134 @@
+﻿
+================================================================================
+EVAL BATTERY  -  local e5 + bge reranker, AFTER header fix
+site: http://localhost:8010
+run : 2026-08-28 12:57:10
+================================================================================
+health: status=healthy files=254 vectors=605 vectorStatus=Green
+
+--- SEMANTIC (14) - no question word appears in the answer filename ---
+
+  Q: what stops someone paying with nothing in their cart   [66981 ms]  <- HIT rank 1
+     1. EmptyBasketOnCheckoutException.cs
+     2. CheckoutTest.cs
+     3. IndexTest.cs
+     4. BasketPageCheckout.cs
+
+  Q: what happens to a guest's items when they sign in   [48955 ms]  <- MISS (expected TransferBasket.cs)
+     1. BasketService.cs
+     2. CachedCatalogItemServiceDecorator.cs
+     3. CatalogItemService.cs
+     4. CatalogItemOrdered.cs
+     5. Basket.cs
+
+  Q: how does the site show a temporary popup message   [83663 ms]  <- rank 3
+     1. Login.cshtml.cs
+     2. ToastService.cs
+     3. ToastComponent.cs
+     4. ExceptionMiddleware.cs
+
+  Q: how does it decide a picture upload is allowed   [71398 ms]  <- HIT rank 1
+     1. ImageValidators.cs
+     2. CatalogItem.cs
+     3. CreateCatalogItemEndpoint.cs
+     4. AuthenticateEndpoint.cs
+
+  Q: what keeps repeated lookups from hitting the database every time   [96495 ms]  <- MISS (expected CacheHelpers.cs)
+     1. CatalogContextSeed.cs
+     2. Dependencies.cs
+     3. AppIdentityDbContextSeed.cs
+     4. BasketQueryService.cs
+     5. ApiTestFixture.cs
+
+  Q: what fills the store with starting products   [92650 ms]  <- HIT rank 1
+     1. CatalogContextSeed.cs
+     2. BasketAddItem.cs
+     3. BasketItem.cs
+
+  Q: what tells us the storefront is still reachable   [67812 ms]  <- MISS (expected HomePageHealthCheck.cs)
+     1. Dependencies.cs
+     2. Checkout.cshtml.cs
+     3. CustomerOrdersWithItemsSpecification.cs
+
+  Q: what turns an unhandled failure into a clean api response   [54246 ms]  <- MISS (expected ExceptionMiddleware.cs)
+     1. AuthenticateEndpoint.cs
+     2. DeleteCatalogItemEndpointTest.cs
+     3. CreateCatalogItemEndpointTest.cs
+     4. CatalogItemGetByIdEndpointTest.cs
+
+  Q: how is a bearer credential produced after sign in   [57271 ms]  <- MISS (expected IdentityTokenClaimService.cs)
+     1. CustomAuthStateProvider.cs
+     2. DeleteCatalogItemEndpointTest.cs
+     3. CreateCatalogItemEndpointTest.cs
+     4. Program.cs
+
+  Q: where does a customer see everything they bought before   [75842 ms]  <- MISS (expected GetMyOrdersHandler.cs)
+     1. CatalogItemOrdered.cs
+     2. CustomerOrdersWithItemsSpecification.cs
+     3. CustomerOrdersSpecification.cs
+
+  Q: how is a long product list broken up for display   [94791 ms]  <- MISS (expected CatalogFilterPaginatedSpecification.cs)
+     1. CustomerOrdersWithItemsSpecification.cs
+     2. CatalogContextSeed.cs
+     3. OrderBuilder.cs
+     4. CatalogIndexViewModel.cs
+
+  Q: what runs when a shopper ends their session   [56484 ms]  <- MISS (expected Logout.cshtml.cs)
+     1. Checkout.cshtml.cs
+     2. GetOrderDetails.cs
+     3. List.razor.cs
+     4. CheckoutTest.cs
+
+  Q: where does someone create a new login   [88522 ms]  <- MISS (expected Register.cshtml.cs)
+     1. CheckoutTest.cs
+     2. ManageController.cs
+     3. Login.cshtml.cs
+     4. AccountControllerSignIn.cs
+
+  Q: how does the browser client know who is currently signed in   [73665 ms]  <- MISS (expected CustomAuthStateProvider.cs)
+     1. AccountControllerSignIn.cs
+     2. CheckoutTest.cs
+     3. OrderControllerIndex.cs
+
+--- IDENTIFIER (4) - lexical control, keyword should win ---
+
+  Q: OrderBuilder   [44258 ms]  <- HIT rank 1
+     1. OrderBuilder.cs
+     2. OrderTotal.cs
+
+  Q: ExceptionMiddleware   [43688 ms]  <- HIT rank 1
+     1. ExceptionMiddleware.cs
+     2. Program.cs
+     3. DuplicateException.cs
+     4. UserNotFoundException.cs
+
+  Q: CacheHelpers   [41764 ms]  <- HIT rank 1
+     1. CacheHelpers.cs
+     2. CachedCatalogViewModelService.cs
+     3. GenerateCatalogItemCacheKey.cs
+     4. GenerateTypesCacheKey.cs
+
+  Q: BasketQueryService   [68464 ms]  <- HIT rank 1
+     1. BasketQueryService.cs
+     2. BasketViewModelService.cs
+
+--- CONTROL (2) - corpus cannot answer these ---
+
+  Q: how many bits in a byte   [77429 ms]  <- CONTROL: 4 distinct file(s) returned, all false positives
+     1. ImageValidators.cs
+     2. 20201202111612_InitialIdentityModel.cs
+     3. AppIdentityDbContextModelSnapshot.cs
+     4. BasketItemConfiguration.cs
+
+  Q: what is the boiling point of water in kelvin   [81365 ms]  <- CONTROL: 5 distinct file(s) returned, all false positives
+     1. CatalogContextSeed.cs
+     2. OrderItem.cs
+     3. CreateCatalogItemEndpoint.cs
+     4. ToastComponent.cs
+     5. BaseResponse.cs
+
+================================================================================
+SCORE
+SEMANTIC     n=14  rank1=3   top5=4   miss=10  MRR=0.238  avg=73,484 ms
+IDENTIFIER   n=4   rank1=4   top5=4   miss=0   MRR=1.000  avg=49,544 ms
+================================================================================

@@ -1,0 +1,60 @@
+[
+  {
+    "Id": "basket-add-item",
+    "Question": "where do we add an item to the basket",
+    "Category": "navigational",
+    "Notes": "Template entry. The service method is the answer; the entity is supporting context.",
+    "Relevant": [
+      { "FilePath": "src/ApplicationCore/Services/BasketService.cs", "ChunkName": "AddItemToBasket", "Grade": 3 },
+      { "FilePath": "src/ApplicationCore/Entities/BasketAggregate/Basket.cs", "Grade": 2 }
+    ]
+  },
+  {
+    "Id": "order-placement",
+    "Question": "how is an order created after checkout",
+    "Category": "conceptual",
+    "Notes": "Template entry. Graded so the orchestrating service outranks the entity definitions.",
+    "Relevant": [
+      { "FilePath": "src/ApplicationCore/Services/OrderService.cs", "Grade": 3 },
+      { "FilePath": "src/ApplicationCore/Entities/OrderAggregate/Order.cs", "Grade": 2 }
+    ]
+  },
+  {
+    "Id": "catalog-filter-spec",
+    "Question": "catalog filter specification",
+    "Category": "navigational",
+    "Notes": "Template entry. Exact-name query: the keyword leg should win this one outright.",
+    "Relevant": [
+      { "FilePath": "src/ApplicationCore/Specifications/CatalogFilterSpecification.cs", "Grade": 3 }
+    ]
+  },
+  {
+    "Id": "identity-setup",
+    "Question": "where is authentication and identity configured",
+    "Category": "conceptual",
+    "Notes": "Template entry. Configuration questions are where file-level full-text usually earns its weight.",
+    "Relevant": [
+      { "FilePath": "src/Web/Configuration/ConfigureCoreServices.cs", "Grade": 2 },
+      { "FilePath": "src/Web/Program.cs", "Grade": 2 }
+    ]
+  },
+  {
+    "Id": "db-context",
+    "Question": "entity framework db context",
+    "Category": "navigational",
+    "Notes": "Template entry.",
+    "Relevant": [
+      { "FilePath": "src/Infrastructure/Data/CatalogContext.cs", "Grade": 3 }
+    ]
+  },
+  {
+    "Id": "repository-pattern",
+    "Question": "how does the generic repository work",
+    "Category": "conceptual",
+    "Notes": "Template entry. Interface and implementation both count, implementation graded higher.",
+    "Relevant": [
+      { "FilePath": "src/Infrastructure/Data/EfRepository.cs", "Grade": 3 },
+      { "FilePath": "src/ApplicationCore/Interfaces/IRepository.cs", "Grade": 2 }
+    ]
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "_comment": "Every list left empty is pinned to the value currently in Config, so a spec varies only what it names. Configuration count is the product of the non-empty lists, and each configuration is a full pass over the golden set.",
+
+  "RrfVectorWeight": [ 40, 60, 80 ],
+  "RrfChunkFtsWeight": [ 30 ],
+  "RrfFileFtsWeight": [ 30 ],
+  "MinFtsRank": [ 5, 10, 20 ],
+  "MaxVectorDistance": [ 0.6, 1.0, 2.0 ],
+  "RerankerEnabled": [ true, false ],
+  "RerankerInputSize": [ 20, 30, 50 ],
+  "Embedder": [],
+  "Reranker": [],
+
+  "MaxConfigurations": 40
+}

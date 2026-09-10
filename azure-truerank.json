@@ -1,0 +1,50 @@
+﻿[
+    {
+        "File":  "EmptyBasketOnCheckoutException.cs",
+        "Kind":  "works",
+        "Local":  1,
+        "Azure":  124
+    },
+    {
+        "File":  "Register.cshtml.cs",
+        "Kind":  "works",
+        "Local":  2,
+        "Azure":  51
+    },
+    {
+        "File":  "TransferBasket.cs",
+        "Kind":  "FAILS",
+        "Local":  93,
+        "Azure":  15
+    },
+    {
+        "File":  "CacheHelpers.cs",
+        "Kind":  "FAILS",
+        "Local":  56,
+        "Azure":  33
+    },
+    {
+        "File":  "HomePageHealthCheck.cs",
+        "Kind":  "FAILS",
+        "Local":  262,
+        "Azure":  61
+    },
+    {
+        "File":  "GetMyOrdersHandler.cs",
+        "Kind":  "FAILS",
+        "Local":  24,
+        "Azure":  99
+    },
+    {
+        "File":  "CatalogFilterPaginatedSpecification.cs",
+        "Kind":  "FAILS",
+        "Local":  60,
+        "Azure":  17
+    },
+    {
+        "File":  "Logout.cshtml.cs",
+        "Kind":  "FAILS",
+        "Local":  59,
+        "Azure":  95
+    }
+]

@@ -1,0 +1,110 @@
+﻿
+================================================================================
+EVAL BATTERY  -  hosted UNVERIFIED-embedder + Qwen3-Reranker-0.6B (mislabelled at run time)
+site: https://azuredevops.aidataforager.com
+run : 2026-08-28 12:17:16
+================================================================================
+health: status=healthy files=254 vectors=605 vectorStatus=Green
+
+--- SEMANTIC (14) - no question word appears in the answer filename ---
+
+  Q: what stops someone paying with nothing in their cart   [1248 ms]  <- MISS (expected EmptyBasketOnCheckoutException.cs)
+     1. IndexTest.cs
+     2. Login.cshtml.cs
+     3. CheckoutTest.cs
+
+  Q: what happens to a guest's items when they sign in   [891 ms]  <- rank 2
+     1. BasketService.cs
+     2. TransferBasket.cs
+     3. Index.cshtml.cs
+
+  Q: how does the site show a temporary popup message   [905 ms]  <- HIT rank 1
+     1. ToastComponent.cs
+     2. ToastService.cs
+     3. ManageController.cs
+
+  Q: how does it decide a picture upload is allowed   [912 ms]  <- MISS (expected ImageValidators.cs)
+     1. CreateCatalogItemEndpoint.cs
+
+  Q: what keeps repeated lookups from hitting the database every time   [878 ms]  <- MISS (expected CacheHelpers.cs)
+     1. CachedCatalogViewModelService.cs
+     2. Dependencies.cs
+     3. BasketQueryService.cs
+
+  Q: what fills the store with starting products   [734 ms]  <- HIT rank 1
+     1. CatalogContextSeed.cs
+     2. Index.cshtml.cs
+     3. BasketViewModelService.cs
+     4. OrderBuilder.cs
+
+  Q: what tells us the storefront is still reachable   [729 ms]  <- MISS (expected HomePageHealthCheck.cs)
+     1. IndexTest.cs
+
+  Q: what turns an unhandled failure into a clean api response   [1029 ms]  <- HIT rank 1
+     1. ExceptionMiddleware.cs
+     2. CatalogItemGetByIdEndpoint.cs
+     3. AuthenticateEndpoint.cs
+     4. UpdateCatalogItemEndpoint.cs
+
+  Q: how is a bearer credential produced after sign in   [723 ms]  <- MISS (expected IdentityTokenClaimService.cs)
+     1. CustomAuthStateProvider.cs
+     2. CreateCatalogItemEndpointTest.cs
+     3. DeleteCatalogItemEndpointTest.cs
+
+  Q: where does a customer see everything they bought before   [727 ms]  <- MISS (expected GetMyOrdersHandler.cs)
+     1. Index.cshtml.cs
+     2. IndexTest.cs
+     3. Login.cshtml.cs
+     4. Basket.cs
+
+  Q: how is a long product list broken up for display   [827 ms]  <- MISS (expected CatalogFilterPaginatedSpecification.cs)
+     1. List.razor.cs
+     2. CatalogContextSeed.cs
+     3. CatalogFilterSpecification.cs
+
+  Q: what runs when a shopper ends their session   [724 ms]  <- MISS (expected Logout.cshtml.cs)
+     1. Checkout.cshtml.cs
+     2. Login.cshtml.cs
+     3. Index.cshtml.cs
+
+  Q: where does someone create a new login   [721 ms]  <- rank 2
+     1. Login.cshtml.cs
+     2. Register.cshtml.cs
+     3. AccountControllerSignIn.cs
+
+  Q: how does the browser client know who is currently signed in   [802 ms]  <- MISS (expected CustomAuthStateProvider.cs)
+     1. AccountControllerSignIn.cs
+     2. OrderControllerIndex.cs
+     3. Login.cshtml.cs
+     4. OrderController.cs
+
+--- IDENTIFIER (4) - lexical control, keyword should win ---
+
+  Q: OrderBuilder   [665 ms]  <- HIT rank 1
+     1. OrderBuilder.cs
+     2. GetById.cs
+
+  Q: ExceptionMiddleware   [798 ms]  <- HIT rank 1
+     1. ExceptionMiddleware.cs
+
+  Q: CacheHelpers   [556 ms]  <- HIT rank 1
+     1. CacheHelpers.cs
+     2. GenerateCatalogItemCacheKey.cs
+     3. GenerateTypesCacheKey.cs
+
+  Q: BasketQueryService   [655 ms]  <- HIT rank 1
+     1. BasketQueryService.cs
+     2. BasketViewModelService.cs
+
+--- CONTROL (2) - corpus cannot answer these ---
+
+  Q: how many bits in a byte   [708 ms]  <- CONTROL: 1 distinct file(s) returned, all false positives
+     1. ImageValidators.cs
+
+  Q: what is the boiling point of water in kelvin   [733 ms]  <- CONTROL: 0 distinct file(s) returned, all false positives
+
+================================================================================
+SCORE
+SEMANTIC     n=14  rank1=3   top5=5   miss=9   MRR=0.286  avg=846 ms
+IDENTIFIER   n=4   rank1=4   top5=4   miss=0   MRR=1.000  avg=669 ms
+================================================================================

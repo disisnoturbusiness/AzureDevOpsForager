@@ -1,0 +1,95 @@
+﻿==============================================================================
+QUERY BATTERY  -  e5 local - HYBRID (baseline)
+site: http://localhost:8010
+run : 2026-08-26 12:59:53
+==============================================================================
+
+--- health ---
+  status=healthy  ftsFileCount=254  vectorPointCount=605  vectorStatus=Green
+
+--- SEMANTIC (plain-English questions) ---
+  Q: how does the app send email   [10842 ms]  <- HIT (rank 1)
+     1. EmailSender.cs
+     2. Program.cs
+     3. Program.cs
+     4. OrderController.cs
+
+  Q: how is the basket total calculated   [1768 ms]  <- HIT (rank 1)
+     1. Basket.cs
+     2. BasketViewModel.cs
+     3. Order.cs
+     4. OrderTotal.cs
+
+  Q: how are users authenticated at sign in   [1513 ms]  <- HIT (rank 1)
+     1. AuthenticateEndpoint.cs
+     2. ManageController.cs
+     3. OrderController.cs
+     4. CustomAuthStateProvider.cs
+
+  Q: how are catalog items filtered by brand and type   [3169 ms]  <- HIT (rank 1)
+     1. CatalogItemService.cs
+     2. 20201202111507_InitialModel.cs
+     3. CatalogViewModelService.cs
+     4. CatalogItemListPagedEndpoint.cs
+
+  Q: where is the database connection configured   [4424 ms]
+     1. Program.cs
+     2. AppIdentityDbContextSeed.cs
+     3. ApiTestFixture.cs
+     4. IdentityHostingStartup.cs
+
+  Q: what happens when a user checks out   [2877 ms]
+     1. ConfigureCookieSettings.cs
+     2. ManageController.cs
+     3. OrderController.cs
+     4. ApiHealthCheck.cs
+
+--- REWORDED (the checkout miss, rephrased) ---
+  Q: create an order from the basket   [1025 ms]  <- HIT (rank 1)
+     1. Order.cs
+     2. Basket.cs
+     3. CatalogContext.cs
+     4. OrderService.cs
+
+  Q: how is an order placed   [1647 ms]  <- HIT (rank 1)
+     1. Order.cs
+     2. GetMyOrdersHandler.cs
+     3. GetOrderDetailsHandler.cs
+     4. CatalogContext.cs
+
+  Q: checkout controller action   [1862 ms]
+     1. BaseApiController.cs
+     2. UrlHelperExtensions.cs
+     3. OrderController.cs
+     4. EmptyBasketOnCheckoutException.cs
+
+--- EXACT IDENTIFIERS (keyword leg) ---
+  Q: EmailSender   [401 ms]  <- HIT (rank 1)
+     1. EmailSender.cs
+     2. IEmailSender.cs
+     3. EmailSenderExtensions.cs
+
+  Q: CatalogItemService   [398 ms]  <- HIT (rank 1)
+     1. CatalogItemService.cs
+     2. ICatalogItemService.cs
+     3. CachedCatalogItemServiceDecorator.cs
+     4. List.razor.cs
+
+  Q: OrderService   [336 ms]  <- HIT (rank 1)
+     1. OrderService.cs
+     2. IOrderService.cs
+
+  Q: IRepository   [646 ms]  <- HIT (rank 1)
+     1. IRepository.cs
+
+  Q: PaymentMethods   [329 ms]
+     1. Buyer.cs
+
+--- NEGATIVE CONTROL (threshold calibration) ---
+  Q: how many bits in a byte   [532 ms]  <- NEGATIVE CONTROL: 4 result(s); every one is a false positive
+     1. ImageValidators.cs
+     2. 20201202111612_InitialIdentityModel.cs
+     3. AppIdentityDbContextModelSnapshot.cs
+     4. 20201202111612_InitialIdentityModel.Designer.cs
+
+==============================================================================

@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AzureDevOpsForager.Core\AzureDevOpsForager.Core.csproj" />
     <ProjectReference Include="..\AzureDevOpsForager.Indexer\AzureDevOpsForager.Indexer.csproj" />
+    <ProjectReference Include="..\AzureDevOpsForager.Eval\AzureDevOpsForager.Eval.csproj" />
   </ItemGroup>
 
 </Project>

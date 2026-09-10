@@ -17,14 +17,13 @@ groqapikey.enc
 groqapikey.txt
 **/groqapikey.txt
 
-# ---- Models: large binaries, fetched via models/download-models.ps1 ----
-models/**/*.onnx
-models/**/*.model
-models/**/*.bin
-models/**/*.safetensors
-models/**/vocab.txt
-models/**/tokenizer.json
-models/**/sentencepiece.bpe.model
+# ---- Models: NOTHING model-related is committed. ----
+# Users fetch their own ONNX exports with models/export-onnx.ps1. Only the scripts and docs
+# in models/ are tracked; every downloaded artifact (weights, tokenizers, configs) stays local.
+models/*
+!models/*.ps1
+!models/*.md
+!models/.gitkeep
 
 # ---- Runtime / generated ----
 logs/
@@ -49,3 +48,7 @@ __pycache__/
 
 # ---- Personal demo deploy (targets a specific Azure resource; not part of the give-away) ----
 scripts/publish-demo.ps1
+
+# ---- Local run logs ----
+*.log
+*.log.err

@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How the Models Were Chosen — Azure DevOps Forager</title>
+  <meta name="description" content="The retrieval-quality engineering behind Azure DevOps Forager: six rerankers evaluated, a vendor benchmark thrown out after independent verification, and the prompt-format finding worth three orders of magnitude. By Dan Weaver." />
+  <meta name="author" content="Dan Weaver" />
+  <link rel="canonical" href="https://azuredevops.aidataforager.com/model-selection.html" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
+  <style>
+    .doc { max-width: 900px; margin: 0 auto; padding: 0 20px 72px; }
+    .doc h2 { font-size: 1.35rem; margin: 2.4rem 0 .6rem; letter-spacing: -0.01em; }
+    .doc h3 { font-size: 1.02rem; margin: 1.7rem 0 .5rem; color: var(--acc); letter-spacing: .01em; }
+    .doc p, .doc li { line-height: 1.65; }
+    .doc ul { padding-left: 1.15rem; }
+    .doc li { margin: .3rem 0; }
+    .lede { font-size: 1.06rem; opacity: .92; border-left: 3px solid var(--acc);
+            padding: .1rem 0 .1rem 1rem; margin: 1.2rem 0 1.8rem; }
+    .card { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--radius); padding: 1.1rem 1.25rem; margin: 1.2rem 0;
+            box-shadow: var(--shadow); }
+    .card.flag { border-color: var(--acc); border-left-width: 3px; }
+    .card.caveat { border-color: var(--amber); border-left-width: 3px; }
+    .tbl-wrap { overflow-x: auto; margin: 1rem 0; }
+    table.ev { width: 100%; border-collapse: collapse; font-size: .92rem; min-width: 520px; }
+    table.ev th, table.ev td { text-align: left; padding: .5rem .7rem;
+                               border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.ev th { color: var(--cyan); font-weight: 600; white-space: nowrap; }
+    table.ev td.num { font-family: var(--font-mono); white-space: nowrap; }
+    .win { color: var(--acc); font-weight: 600; }
+    .lose { color: var(--amber); }
+    .kill { opacity: .62; }
+    code, .mono { font-family: var(--font-mono); font-size: .9em; }
+    .bigstat { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.2rem 0; }
+    .bigstat > div { flex: 1 1 170px; background: var(--surface); border: 1px solid var(--line);
+                     border-radius: var(--radius-sm); padding: .85rem 1rem; }
+    .bigstat b { display: block; font-family: var(--font-mono); font-size: 1.5rem;
+                 color: var(--acc); line-height: 1.15; }
+    .bigstat span { font-size: .82rem; opacity: .78; }
+    .backlink { display: inline-block; margin: 1.4rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <h1>How the Models Were&nbsp;<span class="accent">Chosen</span></h1>
+        <p class="tagline">Retrieval-quality engineering behind this demo &middot; evidence, and its limits</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="topbar-link" href="/">&larr; Back to search</a>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle light / dark theme" aria-label="Switch to light theme">☀</button>
+    </div>
+  </header>
+
+  <main class="doc">
+
+    <div class="card caveat" style="border-left:3px solid var(--amber)">
+      <p style="margin:0 0 .5rem"><strong>Correction, September 2026.</strong> This page recorded
+      <code>Qwen3-Reranker-4B</code> as the deployed reranker. It is not what runs. The live endpoint
+      serves <code>Qwen3-Reranker-0.6B-seq-cls</code>, confirmed from the endpoint's own
+      <code>/v1/models</code> response and the application configuration.</p>
+      <p style="margin:0 0 .5rem">The swap was deliberate, not accidental. On this workload the 4B scored
+      roughly <strong>4% better and ran about 125% slower</strong>. That is not a trade worth making for
+      an interactive search box. The page simply never caught up with the decision, and the endpoint is
+      still <em>named</em> for the 4B, which is how it went unnoticed.</p>
+      <p style="margin:0">Two experiments have since been run against this corpus. Both are reported below,
+      including the one that failed. See <a href="#measured">Measured on this corpus</a>.</p>
+    </div>
+
+    <p class="lede">
+      This page shows how the embedding and reranking models running this demo were selected, what was
+      measured, and — the part most write-ups skip — <strong>what the evidence does not support.</strong>
+      Every number below is either measured against the live endpoints or a published benchmark with its
+      source named. The two are never mixed.
+    </p>
+
+    <h2>The finding worth three orders of magnitude</h2>
+
+    <p>
+      Qwen3-Reranker scores through its chat template. Testing that wrapping applied client-side against
+      posting raw query/document text — <em>same model, same endpoint, same documents</em>:
+    </p>
+
+    <div class="bigstat">
+      <div><b>4,600&times;</b><span>relevant vs irrelevant separation, chat-template wrapping</span></div>
+      <div><b>3.3&times;</b><span>the same test, raw prompt</span></div>
+      <div><b>918 ms</b><span>warm query, end to end</span></div>
+    </div>
+
+    <p>
+      Both calls hit the same live endpoint, which at the time of this July 2026 test served <code>Qwen3-Reranker-4B-seq-cls</code>, 329 prompt tokens,
+      three documents and one query:
+    </p>
+
+    <div class="card">
+      <p style="margin:0 0 .4rem"><strong>Instruct:</strong> <span class="mono">Given a code search query, retrieve relevant code chunks that answer the query.</span></p>
+      <p style="margin:0"><strong>Query:</strong> <span class="mono">how is user authentication handled</span></p>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Document</th><th>Chat-template wrapped</th><th>Raw</th></tr></thead>
+        <tbody>
+          <tr><td><code>PasswordSignInAsync(...)</code> <span class="win">— the answer</span></td><td class="num win">0.1618865728</td><td class="num">0.375985</td></tr>
+          <tr><td><code>LogTimestamp(...)</code> — logging helper</td><td class="num lose">0.0000346425</td><td class="num">0.105656</td></tr>
+          <tr><td><code>CalculateBasketTotal(...)</code> — unrelated</td><td class="num lose">0.0000053275</td><td class="num">0.113646</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><th>Separation, top vs next</th><th class="num win">4,673&times;</th><th class="num lose">3.31&times;</th></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="card flag">
+      <p style="margin:0 0 .55rem">
+        <strong>The takeaway isn't the model — and it isn't that raw "fails."</strong> Raw still ranked the
+        authentication method first. It got the answer right. What it lost was <em>discrimination</em>: it
+        scored a basket-total calculation and a logging helper within 8% of each other, and both within a
+        factor of 3.5 of the correct answer.
+      </p>
+      <p style="margin:0">
+        Wrapped, the correct answer sits <strong>4,673&times;</strong> above the next candidate and
+        <strong>30,388&times;</strong> above the worst. That margin is what makes a score threshold possible
+        at all. Three orders of magnitude of usable signal lived in the prompt formatting, not the weights.
+      </p>
+    </div>
+
+    <h2>What it actually retrieves</h2>
+
+    <p>
+      Six plain-English questions, fired at the live index — 254 files, 605 chunks, health green. No keyword
+      overlap engineered in; these are questions phrased the way someone would actually ask them.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Question</th><th>Top results</th></tr></thead>
+        <tbody>
+          <tr><td>how does the app send email</td><td><span class="win">EmailSender.cs</span> · Program.cs · OrderController.cs</td></tr>
+          <tr><td>how is the basket total calculated</td><td><span class="win">Basket.cs</span> · BasketViewModel.cs · Order.cs · OrderTotal.cs</td></tr>
+          <tr><td>how are users authenticated at sign in</td><td><span class="win">AuthenticateEndpoint.cs</span> · ManageController.cs · CustomAuthStateProvider.cs</td></tr>
+          <tr><td>how are catalog items filtered by brand and type</td><td><span class="win">CatalogItemService.cs</span> · CatalogViewModelService.cs · CatalogBrand.cs</td></tr>
+          <tr><td>where is the database connection configured</td><td>AppIdentityDbContextSeed.cs · IdentityHostingStartup.cs</td></tr>
+          <tr class="kill"><td>what happens when a user checks out</td><td class="lose">ConfigureCookieSettings.cs · ApiHealthCheck.cs — <strong>miss</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>Five hit, one missed</strong> — and the miss is the useful one. "What happens when a user checks
+      out" returned cookie settings and health checks: nothing to do with checkout. Rewording found the
+      boundary:
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Reworded</th><th>Top results</th></tr></thead>
+        <tbody>
+          <tr><td>create an order from the basket</td><td><span class="win">Order.cs</span> · Basket.cs · OrderService.cs</td></tr>
+          <tr><td>how is an order placed</td><td><span class="win">Order.cs</span> · GetMyOrdersHandler.cs · GetOrderDetailsHandler.cs</td></tr>
+          <tr><td>checkout controller action</td><td class="lose">BaseApiController.cs — still weak</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The corpus has no "checkout" concept — it models the same idea as <em>orders</em>. The retrieval wasn't
+      broken; the vocabulary was. Naming the domain concept fixes it instantly, and no amount of reranking
+      would have.
+    </p>
+
+    <h3>The keyword leg, tested separately</h3>
+    <p>
+      Exact identifiers should not need semantics, and they don't:
+      <code>EmailSender</code> &rarr; EmailSender.cs, IEmailSender.cs, EmailSenderExtensions.cs ·
+      <code>OrderService</code> &rarr; OrderService.cs, IOrderService.cs ·
+      <code>IRepository</code> &rarr; IRepository.cs.
+      <code>PaymentMethods</code> returned exactly <strong>one</strong> result — Buyer.cs — rather than
+      padding the list with near-misses.
+    </p>
+
+    <h2>Six rerankers evaluated</h2>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Model</th><th>Params</th><th>Code benchmark</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr class="kill"><td>Qwen3-Reranker-4B</td><td>4B</td><td class="num">MTEB-Code 81.20</td><td>chosen on paper; <strong>~4% better, ~125% slower</strong>, so not deployed</td></tr>
+          <tr><td>Qwen3-Reranker-8B</td><td>8B</td><td class="num">MTEB-Code 81.22</td><td>+0.02 for ~2&times; cost — rejected</td></tr>
+          <tr><td class="win">Qwen3-Reranker-0.6B</td><td>0.6B</td><td class="num">CoIR 65.18</td><td class="win">deployed: the 4B's quality edge did not pay for its latency</td></tr>
+          <tr><td>mxbai-rerank-base-v2</td><td>0.5B</td><td class="num">CoIR 65.71</td><td>≈ tie, kept as A/B arm</td></tr>
+          <tr><td class="lose">bge-reranker-v2-m3 <em>(incumbent)</em></td><td>0.57B</td><td class="num">CoIR 36.28</td><td class="lose">replaced</td></tr>
+          <tr class="kill"><td>jina-reranker-v3 / jina-code</td><td>—</td><td class="num">strong</td><td>CC-BY-NC — license-blocked</td></tr>
+          <tr class="kill"><td>zerank-1-small / zerank-2</td><td>1.7B / 4B</td><td class="num">nDCG@10 0.6528</td><td>CC-BY-NC or ~3&times; cost</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The incumbent was not bad — it remains strong on multilingual text (MIRACL 69.32, best in its table).
+      It was bad <em>specifically on code</em>, at roughly half the achievable nDCG.
+    </p>
+
+    <h2>Why the headline benchmark was thrown out</h2>
+
+    <p>
+      The widely-quoted figure for this comparison is <span class="mono">MTEB-Code 73.42 vs 41.38</span>.
+      It did not survive checking: that number is the <strong>vendor scoring its own model on its own
+      retrieved candidates.</strong> Not independent.
+    </p>
+
+    <p>
+      So the claim was verified from a primary source instead — <strong>arXiv 2509.25085 v3, Table 2</strong>,
+      published by a <em>rival</em> lab:
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Benchmark</th><th>Qwen3-Reranker-0.6B</th><th>bge-reranker-v2-m3</th><th>Read</th></tr></thead>
+        <tbody>
+          <tr><td>CoIR (code)</td><td class="num win">65.18</td><td class="num lose">36.28</td><td>~29 pt code gap — real</td></tr>
+          <tr><td>BEIR (general)</td><td class="num">56.28</td><td class="num">56.51</td><td>parity</td></tr>
+          <tr><td>MIRACL (multilingual)</td><td class="num">57.70</td><td class="num win">69.32</td><td>incumbent wins</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The gap is genuine, independent, and same-pipeline. Worth noting: <strong>two of the nine research
+      agents reported that this table did not exist</strong> — they had read an earlier revision of the
+      paper. Pinning the revision caught it.
+    </p>
+
+    <div class="card caveat">
+      <h3 style="margin-top:0">And then the benchmarks were demoted anyway</h3>
+      <p style="margin-bottom:.5rem">
+        <strong>MTEB-Code and CoIR contain zero named C#.</strong> No model in this field has any published
+        C#-specific evaluation. Qwen was fine-tuned on CodeSearchNet; the incumbent had no code training at
+        all. CoREB (2026) separately found <em>no off-the-shelf reranker is net-positive across code tasks.</em>
+      </p>
+      <p style="margin-bottom:0">
+        So published benchmarks can <strong>pick candidates. They cannot decide a winner.</strong> Every
+        option is equally unproven on C#. That is the entire reason a hand-labelled golden set is mandatory
+        rather than nice-to-have.
+      </p>
+    </div>
+
+    <h2>Two calls that went against the obvious answer</h2>
+
+    <h3>Staging was inverted — embedder first, reranker second</h3>
+    <p>
+      The instinct is to swap the reranker first, since its benchmark gap is larger. Rejected: the reranker
+      is the <em>risky</em> integration — chat-template handling plus yes/no logit extraction, and both vLLM
+      and llama.cpp had shipped silent-wrong-score bugs. The embedder is deterministic, parity-testable, and
+      a drop-in dimension. <strong>Do the verifiable one first.</strong>
+    </p>
+
+    <h3>A cost claim was corrected by hand</h3>
+    <p>
+      One research pass asserted the new reranker cost "+35% FLOPs." Working the embedding-table math
+      directly — the incumbent's XLM-R-large table is ~250,002&nbsp;&times;&nbsp;1024 &asymp; 256M of its
+      568M parameters and carries no FLOPs, leaving ~312M non-embedding, against Qwen3-0.6B's ~440M — gives
+      <strong>&asymp;1.41&times;</strong>. The full-vocab <code>lm_head</code> at only the last position is
+      ~0.3 GFLOP, negligible. "+35%" was true only for a naive all-position export.
+    </p>
+
+    <h2>Speed decided as much as accuracy</h2>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Measurement</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Warm query, end to end</td><td class="num win">918 ms</td></tr>
+          <tr><td>Cold start — scaled-to-zero endpoint + auto-paused SQL</td><td class="num lose">116,466 ms (1 m 56 s)</td></tr>
+          <tr><td>Endpoint warm via heartbeat</td><td class="num">1 s</td></tr>
+          <tr><td>Full reindex — 254 files / 605 chunks, staging + atomic swap</td><td class="num">1 m 13 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>Cold start, not accuracy, was the real product risk.</strong> A visitor arriving after an idle
+      period gets a first query that can take two minutes. Someone who assumes it's broken and leaves at
+      second 20 never sees the retrieval quality at all. That produced the warm-up retry, the heartbeat, and
+      honest "waking up the server…" messaging instead of a spinner that lies.
+    </p>
+
+    <p>
+      Speed also drove the hardware. Sized then for the 4B, which fits a cheaper L4, <strong>A10G was chosen for
+      ~2&times; the memory bandwidth</strong> and better latency. Always-on serving was costed at
+      ~$1,150/month; scale-to-zero brings real demo usage to a few dollars a day.
+    </p>
+
+    <h2 id="measured">Measured on this corpus</h2>
+
+    <p>
+      Everything above this point is published benchmarks plus one live prompt-format test. This section is
+      different: it is this system, this corpus, measured in September 2026. Both experiments are reported,
+      including the one that was wrong.
+    </p>
+
+    <h3 style="margin-top:1.4rem">A question set built to discriminate, not to demo</h3>
+
+    <p>
+      The original six demo questions each contained a word from their own answer's filename, so plain
+      keyword matching could win them outright and no embedder was ever really under test. The replacement
+      set has fourteen questions with <strong>zero token overlap</strong> between question and answer
+      filename, verified per question at run time, plus four exact class names as a lexical control and two
+      unanswerable questions to check abstention.
+    </p>
+
+    <h3 style="margin-top:1.4rem">Experiment 1: the chunk header. Wrong.</h3>
+
+    <p>
+      Every indexed chunk carried a context header naming the file, namespace, class and fields. Measured
+      across 605 chunks it was <strong>33.3%</strong> of all embedded text, and 36% of chunks carried it
+      twice. The theory was that this collapsed a file's chunks toward one vector describing the header
+      rather than the code. It was stripped, the corpus fully reindexed, and the identical battery rerun.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Semantic set</th><th>rank&nbsp;1</th><th>top&nbsp;5</th><th>MRR</th></tr></thead>
+        <tbody>
+          <tr><td>Header left in place</td><td class="num">3 / 14</td><td class="num">6 / 14</td><td class="num">0.304</td></tr>
+          <tr class="lose"><td>Header stripped</td><td class="num">3 / 14</td><td class="num">4 / 14</td><td class="num">0.238</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      It got worse, and not one of the six questions that both stacks missed moved. The header was not inert
+      noise: <code>// Class: RegisterModel</code> was the only occurrence of "register" in that chunk, so
+      Register.cshtml.cs fell from rank 1 to absent. Class and file names are real signal for
+      natural-language questions. The change was reverted.
+    </p>
+
+    <h3 style="margin-top:1.4rem">Experiment 2: is a code-specialized embedder worth it?</h3>
+
+    <p>
+      The comparison that had never been run. Local <code>e5-large-v2</code> (general-purpose, 1024-dim,
+      ONNX on CPU) against the hosted code embedder (1536-dim, GPU). Both corpora verified identical first:
+      605 chunks, 605 vectors, 351 carrying the header, on each side. The measurement is the exact cosine
+      rank of the correct file across all 605 chunks, with no index approximation, no fusion, no reranker
+      and no score floor, so nothing but the embedder is being compared.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Question&rsquo;s correct answer</th><th>e5-large-v2</th><th>code embedder</th><th>Better</th></tr></thead>
+        <tbody>
+          <tr><td>TransferBasket.cs</td><td class="num">93</td><td class="num win">15</td><td class="win">code, by 78</td></tr>
+          <tr><td>CatalogFilterPaginatedSpecification.cs</td><td class="num">60</td><td class="num win">17</td><td class="win">code, by 43</td></tr>
+          <tr><td>CacheHelpers.cs</td><td class="num">56</td><td class="num win">33</td><td class="win">code, by 23</td></tr>
+          <tr><td>HomePageHealthCheck.cs</td><td class="num">262</td><td class="num win">61</td><td class="win">code, by 201</td></tr>
+          <tr><td>GetMyOrdersHandler.cs</td><td class="num win">24</td><td class="num">99</td><td>e5, by 75</td></tr>
+          <tr><td>Logout.cshtml.cs</td><td class="num win">59</td><td class="num">95</td><td>e5, by 36</td></tr>
+          <tr class="kill"><td>EmptyBasketOnCheckoutException.cs <em>(control)</em></td><td class="num win">1</td><td class="num">124</td><td>e5, by 123</td></tr>
+          <tr class="kill"><td>Register.cshtml.cs <em>(control)</em></td><td class="num win">2</td><td class="num">51</td><td>e5, by 49</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>The code-specialized embedder wins four of the six hard questions, and on one of them the
+      margin is large. It still does not make them retrievable.</strong> Its best rank anywhere in that set
+      is 15 of 605, so every one of these questions still misses a top-5 result. And it is substantially
+      worse on the two questions the general-purpose model answers at rank 1 and rank 2.
+    </p>
+
+    <p>
+      The honest conclusion is that neither embedder can answer these six, that the two are good at
+      different questions rather than one being better, and that the remaining gap is not something a
+      better embedding model fixes. Chunking strategy is the open candidate.
+    </p>
+
+    <h2>What this evidence does not support</h2>
+
+    <div class="card caveat">
+      <ul style="margin:0">
+        <li><strong>There is no nDCG or recall@k measured on this corpus.</strong> The benchmark figures are
+            published results on public datasets; the 4,600&times; result is a score-separation test on a
+            hand-built three-document probe.</li>
+        <li><strong>The six rerankers were never run head-to-head on the same query.</strong> That table is
+            published benchmarks, not a bake-off on this corpus. The live measurement above tested one model
+            against itself in two prompt formats — it says nothing about how the other five would have
+            scored.</li>
+        <li><strong>There are no per-model latency numbers.</strong> The 918 ms is whole-system, end to end.
+            Nothing here isolates reranker time from embedding, SQL, or fusion.</li>
+        <li><strong>The same is true of the embedders.</strong> The retrieval battery above ran after the
+            embedding swap, so it reflects one model only. The previous embedder was never run against those
+            six questions.
+            <em>This one is runnable, though</em> — both embedder paths ship in the codebase (local ONNX
+            e5-large-v2 at 1024-dim, hosted bge-code-v1 at 1536), so it is two indexes and two harness runs,
+            not a dead end. It is an unrun experiment, not an impossible one.</li>
+        <li><strong>There is no model-vs-model A/B on this system's own retrieval quality.</strong> That needs
+            a hand-labelled golden set of ~30 queries against the live index. The harness that produces it is
+            built; the golden set is not yet labelled.</li>
+        <li><strong>Comparing embedders is not a sweep.</strong> Each embedding model requires a full reindex,
+            because the query vector must match the stored vector geometry.</li>
+      </ul>
+    </div>
+
+    <p>
+      The model selection is defensible on independent benchmarks plus a decisive live prompt-format
+      measurement. The end-to-end retrieval-quality number is the one thing still missing, and it is gated on
+      labelling that golden set. Stating that plainly is more useful than a chart that implies otherwise.
+    </p>
+
+    <p class="backlink"><a href="/">&larr; Try the search this all feeds</a></p>
+
+  </main>
+
+  <footer class="foot">
+    <p class="foot-about">Hybrid semantic code search over Azure DevOps, Git &amp; GitHub — SQL Server 2025 native vectors + cross-encoder reranking.</p>
+    <span>SQL Server 2025 / Azure SQL &middot; bge-code-v1 code embeddings (1536-dim) &middot; RRF hybrid fusion &middot; Qwen3-Reranker-0.6B</span>
+    <p class="foot-built">
+      Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; remote
+    </p>
+    <p class="foot-links">
+      <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">Source on GitHub</a>
+      &middot;
+      <a href="https://www.linkedin.com/in/dan-weaver-1861038" target="_blank" rel="noopener">LinkedIn</a>
+      &middot;
+      <a href="https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx" target="_blank" rel="noopener">Hugging Face</a>
+      &middot;
+      <a href="mailto:disisnoturbusiness@gmail.com">Email</a>
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var KEY = "adf-theme";
+      var btn = document.getElementById("themeToggle");
+      function apply(t) {
+        var light = (t === "light");
+        if (light) document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        if (btn) {
+          btn.textContent = light ? "☾" : "☀";
+          btn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+      try { apply(localStorage.getItem(KEY) || "dark"); } catch (e) { apply("dark"); }
+      if (btn) btn.addEventListener("click", function () {
+        var next;
+        try { next = (localStorage.getItem(KEY) === "light") ? "dark" : "light"; } catch (e) { next = "dark"; }
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    })();
+  </script>
+</body>
+</html>

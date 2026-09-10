@@ -1,0 +1,26 @@
+﻿====================================================================================================
+RETRIEVAL vs RERANKER  -  where the correct answer sat before and after the cross-encoder
+pool = 30 (RerankerInputSize)   weights v=60 cfts=30 ffts=30   site http://localhost:8010
+====================================================================================================
+expected file                                        hyb    vec    fts    final   verdict
+----------------------------------------------------------------------------------------------------
+EmptyBasketOnCheckoutException.cs                      4   1  10   1   ok
+TransferBasket.cs                                      -   -   -   -   RETRIEVAL MISS - not in pool of 30 at all
+ToastComponent.cs                                      4   -   5   4   ok
+ImageValidators.cs                                     5   1   9   2   ok
+CacheHelpers.cs                                        -   -   -   -   RETRIEVAL MISS - not in pool of 30 at all
+CatalogContextSeed.cs                                  1  11   1   1   ok
+HomePageHealthCheck.cs                                 -   -   -   -   RETRIEVAL MISS - not in pool of 30 at all
+ExceptionMiddleware.cs                                 4   1  14   -   RERANKER DEMOTED (retrieval had it at 4)
+IdentityTokenClaimService.cs                          13   6   -   2   ok
+GetMyOrdersHandler.cs                                 19  16   -   -   retrieval weak (rank 19 in pool), reranker did not rescue
+CatalogFilterPaginatedSpecification.cs                21   -   -   -   retrieval weak (rank 21 in pool), reranker did not rescue
+Logout.cshtml.cs                                       -   -   -   -   RETRIEVAL MISS - not in pool of 30 at all
+Register.cshtml.cs                                     2   2  16   1   ok
+CustomAuthStateProvider.cs                             -   -   -   -   RETRIEVAL MISS - not in pool of 30 at all
+----------------------------------------------------------------------------------------------------
+final top-5 hits      : 6
+reranker demoted      : 1   <- retrieval was right, cross-encoder lost it
+retrieval weak        : 2   <- in pool but deep; reranker failed to promote
+retrieval miss        : 5   <- never in the pool; embedder/corpus limit
+====================================================================================================

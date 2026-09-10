@@ -1,0 +1,43 @@
+{
+  "_comment": "LOCAL e5 A/B TEST CONFIG — 2026-08-25. Purpose: index eShopOnWeb with the LOCAL ONNX stack (e5-large-v2 1024-dim + bge-reranker-v2-m3) so the six-question battery can be run against it and compared with the hosted bge-code-v1 + Qwen3-Reranker-4B results. Copy this file to config.json next to the Server exe AND the Indexer exe.",
+
+  "ServerUrl": "http://localhost:8010",
+  "Port": "8010",
+
+  "_comment_sql": "SQL Server 2025, default instance. Trusted_Connection uses your Windows login.",
+  "SqlConnectionString": "Server=localhost;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
+  "AzdoVectorConnectionString": "Server=localhost;Database=AzureDevOpsForager;Trusted_Connection=True;TrustServerCertificate=True;",
+
+  "_comment_models": "ABSOLUTE paths — relative ones resolve against the working directory, not the exe folder. JSON requires each backslash doubled; Windows collapses the doubles, so these paste into Explorer as-is. EmbeddingDimension MUST be 1024 for e5-large-v2 — the 1536 default matches the hosted bge-code-v1 and would build the DDL, DiskANN index and SearchCode proc at the wrong width.",
+  "OnnxModelPath": "C:\\Temp\\ForClaude\\AzureDevOpsForager\\models\\e5-large-v2\\e5-large-v2.onnx",
+  "EmbeddingDimension": "1024",
+  "RerankerModelPath": "C:\\Temp\\ForClaude\\AzureDevOpsForager\\models\\bge-reranker-v2-m3-onnx\\model.onnx",
+  "RerankerEnabled": "true",
+
+  "_comment_rerankerpool": "30 is the production default. 10 for this test: the cross-encoder scores every candidate on CPU and we are measuring rank-1 correctness, not pool depth. Raise back to 30 if comparing recall.",
+  "RerankerInputSize": "10",
+
+  "_comment_huggingface": "DELIBERATELY BLANK. The Server prefers Hugging Face whenever these are set, which would embed queries with bge-code-v1 (1536-dim) against an index built with e5 (1024-dim). Every result would be garbage.",
+  "HuggingFaceEmbedUrl": "",
+  "HuggingFaceRerankUrl": "",
+
+  "_comment_embedservice": "Blanked so nothing can silently fall through to the hosted Azure endpoint mid-index. Local ONNX only.",
+  "EmbeddingServiceUrl": "",
+
+  "_comment_corpus": "Same corpus as the live hosted demo (254 files / 605 chunks) — this is what makes the two runs comparable. Do not change it.",
+  "SourceType": "github",
+  "GitHubRepoUrl": "https://github.com/dotnet-architecture/eShopOnWeb",
+  "GitBranch": "",
+  "GitHubToken": "",
+
+  "IncludeGlobs": "**/*.cs",
+  "ExcludeGlobs": "**/bin/**;**/obj/**",
+
+  "RrfVectorWeight": "60",
+  "RrfChunkFtsWeight": "30",
+  "RrfFileFtsWeight": "30",
+  "MinFtsRank": "10",
+
+  "_comment_maxvectordistance": "KEEP AT 2.0. The cut is applied INSIDE VECTOR_SEARCH, so a value below the model's real NL-to-code distance floor empties the vector leg silently and search degrades to full-text with no error. 2.0 disables the cut. Do not tighten without re-measuring for e5.",
+  "MaxVectorDistance": "2.0"
+}
