@@ -251,3 +251,86 @@ stronger than its vector leg alone.
 
 One endpoint wake, 46 seconds to scale from zero, then eight embed calls. No reranker calls and
 no publish.
+
+---
+
+# The reranker comparison (2026-09-10)
+
+The experiment that should have been run first. Both rerankers were handed the **identical**
+candidate shortlist for every question, so the embedder, the index, the fusion weights and the
+score floors are all removed from the comparison. A cross-encoder is a pure function of
+(query, documents); give two of them the same documents and the only variable left is the model.
+
+    LOCAL   bge-reranker-v2-m3            ONNX, CPU
+    HOSTED  Qwen3-Reranker-0.6B-seq-cls   vLLM, GPU
+
+Shortlists came from one `dbo.SearchCode` call per question at TopN=30, the same pool depth the
+server uses (`RerankerInputSize`). Ranks are file-level after de-duplication.
+
+Only the 13 questions whose shortlist actually contained the answer are scored. A reranker cannot
+reorder a document that was never retrieved, so scoring the other five would measure retrieval and
+blame the reranker for it.
+
+## Result
+
+| expected file | first stage | bge-v2-m3 | Qwen3-0.6B | |
+|---|---|---|---|---|
+| EmptyBasketOnCheckoutException.cs | 8 | 1 | 1 | tie |
+| ToastComponent.cs | 4 | 4 | **1** | Qwen3 |
+| ImageValidators.cs | 6 | 2 | **1** | Qwen3 |
+| CatalogContextSeed.cs | 1 | 1 | 1 | tie |
+| ExceptionMiddleware.cs | 5 | 5 | **1** | Qwen3 |
+| IdentityTokenClaimService.cs | 18 | **2** | 5 | bge |
+| GetMyOrdersHandler.cs | 27 | 7 | **4** | Qwen3 |
+| CatalogFilterPaginatedSpecification.cs | 28 | 9 | **4** | Qwen3 |
+| Register.cshtml.cs | 2 | **1** | 3 | bge |
+| OrderBuilder.cs *(identifier)* | 2 | 3 | **1** | Qwen3 |
+| ExceptionMiddleware.cs *(identifier)* | 1 | 1 | 1 | tie |
+| CacheHelpers.cs *(identifier)* | 1 | 1 | 1 | tie |
+| BasketQueryService.cs *(identifier)* | 1 | 1 | 1 | tie |
+
+    Qwen3-Reranker-0.6B wins 6    bge-reranker-v2-m3 wins 2    tie 5
+
+| stage | MRR | over first stage |
+|---|---|---|
+| first stage, no rerank | 0.452 | |
+| bge-reranker-v2-m3 | 0.618 | +37% |
+| **Qwen3-Reranker-0.6B** | **0.772** | **+71%** |
+
+## What this changes
+
+**The reranker is where the retrieval quality lives on this corpus, and the embedder is not.**
+Swapping the embedding model moved nothing that mattered: four wins out of six hard questions, no
+question made retrievable, and both controls badly worse. Swapping the reranker on identical input
+moves MRR by 71%.
+
+The clearest cases are the ones retrieval nearly lost. `GetMyOrdersHandler.cs` came out of the
+first stage at rank 27 and `CatalogFilterPaginatedSpecification.cs` at 28, both effectively
+invisible, and Qwen3 pulled them to 4. `ExceptionMiddleware.cs` sat at 5 and went to 1, where
+bge left it at 5 and never moved it at all.
+
+bge is not useless: it still adds 37% over raw retrieval, and it wins two questions outright,
+including rescuing `IdentityTokenClaimService.cs` from 18 to 2 where Qwen3 only reached 5. But
+across the set it is the weaker model by a clear margin.
+
+**This also settles the earlier ambiguity about the deployed 0.6B.** The docs recorded the 4B as
+chosen, and the 0.6B was deployed instead for latency. On measured retrieval quality against the
+model this project previously shipped, the 0.6B is the stronger reranker regardless.
+
+## What it does not settle
+
+Only two of the six rerankers in the evaluation table have now been run head to head. The other
+four remain published benchmarks.
+
+Five questions are still unanswerable by this pipeline because the first stage never surfaces the
+right file. No reranker can fix that, and this experiment does not try to.
+
+Latency is not scored. The two models run on different hardware, roughly 250 ms per query on GPU
+against roughly 140 s on CPU, which measures an A10G against a laptop and says nothing about
+either model.
+
+## Reproducing
+
+    scripts/rerank-ab/    candidates -> hosted -> local -> report
+
+Raw output is in `rerank-candidates.json`, `rerank-hosted.json` and `rerank-local.json`.

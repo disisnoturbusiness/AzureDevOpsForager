@@ -1,0 +1,272 @@
+[
+  {
+    "Question": "what stops someone paying with nothing in their cart",
+    "Expected": "EmptyBasketOnCheckoutException.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 8,
+    "Rank": 1,
+    "Ms": 149276,
+    "Top5": [
+      "EmptyBasketOnCheckoutException.cs",
+      "Buyer.cs",
+      "CheckoutTest.cs",
+      "IndexTest.cs",
+      "Checkout.cshtml.cs"
+    ]
+  },
+  {
+    "Question": "what happens to a guest\u0027s items when they sign in",
+    "Expected": "TransferBasket.cs",
+    "Kind": "semantic",
+    "FirstStageRank": -1,
+    "Rank": -1,
+    "Ms": 133521,
+    "Top5": [
+      "Checkout.cshtml.cs",
+      "CachedCatalogItemServiceDecorator.cs",
+      "Index.cshtml.cs",
+      "BasketService.cs",
+      "IndexTest.cs"
+    ]
+  },
+  {
+    "Question": "how does the site show a temporary popup message",
+    "Expected": "ToastComponent.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 4,
+    "Rank": 4,
+    "Ms": 137718,
+    "Top5": [
+      "Login.cshtml.cs",
+      "ExceptionMiddleware.cs",
+      "ErrorDetails.cs",
+      "ToastComponent.cs",
+      "Error.cshtml.cs"
+    ]
+  },
+  {
+    "Question": "how does it decide a picture upload is allowed",
+    "Expected": "ImageValidators.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 6,
+    "Rank": 2,
+    "Ms": 136628,
+    "Top5": [
+      "CreateCatalogItemEndpoint.cs",
+      "ImageValidators.cs",
+      "CatalogItem.cs",
+      "AuthenticateEndpoint.cs",
+      "Login.cshtml.cs"
+    ]
+  },
+  {
+    "Question": "what keeps repeated lookups from hitting the database every time",
+    "Expected": "CacheHelpers.cs",
+    "Kind": "semantic",
+    "FirstStageRank": -1,
+    "Rank": -1,
+    "Ms": 130681,
+    "Top5": [
+      "Dependencies.cs",
+      "CatalogContextSeed.cs",
+      "WebTestFixture.cs",
+      "BasketQueryService.cs",
+      "AppIdentityDbContextSeed.cs"
+    ]
+  },
+  {
+    "Question": "what fills the store with starting products",
+    "Expected": "CatalogContextSeed.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 1,
+    "Rank": 1,
+    "Ms": 143837,
+    "Top5": [
+      "CatalogContextSeed.cs",
+      "Basket.cs",
+      "BasketViewModelService.cs",
+      "Index.cshtml.cs",
+      "BasketAddItem.cs"
+    ]
+  },
+  {
+    "Question": "what tells us the storefront is still reachable",
+    "Expected": "HomePageHealthCheck.cs",
+    "Kind": "semantic",
+    "FirstStageRank": -1,
+    "Rank": -1,
+    "Ms": 139867,
+    "Top5": [
+      "Dependencies.cs",
+      "EmptyBasketOnCheckoutException.cs",
+      "CustomerOrdersWithItemsSpecification.cs",
+      "Login.cshtml.cs",
+      "Checkout.cshtml.cs"
+    ]
+  },
+  {
+    "Question": "what turns an unhandled failure into a clean api response",
+    "Expected": "ExceptionMiddleware.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 5,
+    "Rank": 5,
+    "Ms": 133168,
+    "Top5": [
+      "AuthenticateEndpoint.cs",
+      "CreateCatalogItemEndpoint.cs",
+      "UpdateCatalogItemEndpoint.cs",
+      "DeleteCatalogItemEndpointTest.cs",
+      "ExceptionMiddleware.cs"
+    ]
+  },
+  {
+    "Question": "how is a bearer credential produced after sign in",
+    "Expected": "IdentityTokenClaimService.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 18,
+    "Rank": 2,
+    "Ms": 117755,
+    "Top5": [
+      "CustomAuthStateProvider.cs",
+      "IdentityTokenClaimService.cs",
+      "ApiTokenHelper.cs",
+      "CreateCatalogItemEndpointTest.cs",
+      "DeleteCatalogItemEndpointTest.cs"
+    ]
+  },
+  {
+    "Question": "where does a customer see everything they bought before",
+    "Expected": "GetMyOrdersHandler.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 27,
+    "Rank": 7,
+    "Ms": 195067,
+    "Top5": [
+      "CatalogItemOrdered.cs",
+      "CustomerOrdersWithItemsSpecification.cs",
+      "BasketViewModel.cs",
+      "GetMyOrders.cs",
+      "Login.cshtml.cs"
+    ]
+  },
+  {
+    "Question": "how is a long product list broken up for display",
+    "Expected": "CatalogFilterPaginatedSpecification.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 28,
+    "Rank": 9,
+    "Ms": 146153,
+    "Top5": [
+      "CustomerOrdersWithItemsSpecification.cs",
+      "CatalogContextSeed.cs",
+      "BasketViewModelService.cs",
+      "Basket.cs",
+      "CatalogIndexViewModel.cs"
+    ]
+  },
+  {
+    "Question": "what runs when a shopper ends their session",
+    "Expected": "Logout.cshtml.cs",
+    "Kind": "semantic",
+    "FirstStageRank": -1,
+    "Rank": -1,
+    "Ms": 129012,
+    "Top5": [
+      "Checkout.cshtml.cs",
+      "EmptyBasketOnCheckoutException.cs",
+      "CatalogViewModelService.cs",
+      "Index.cshtml.cs",
+      "CachedCatalogViewModelService.cs"
+    ]
+  },
+  {
+    "Question": "where does someone create a new login",
+    "Expected": "Register.cshtml.cs",
+    "Kind": "semantic",
+    "FirstStageRank": 2,
+    "Rank": 1,
+    "Ms": 116662,
+    "Top5": [
+      "Register.cshtml.cs",
+      "ManageController.cs",
+      "OrderControllerIndex.cs",
+      "Login.cshtml.cs",
+      "Program.cs"
+    ]
+  },
+  {
+    "Question": "how does the browser client know who is currently signed in",
+    "Expected": "CustomAuthStateProvider.cs",
+    "Kind": "semantic",
+    "FirstStageRank": -1,
+    "Rank": -1,
+    "Ms": 119506,
+    "Top5": [
+      "AccountControllerSignIn.cs",
+      "AuthenticateEndpoint.cs",
+      "Login.cshtml.cs",
+      "BasketPageCheckout.cs",
+      "CheckoutTest.cs"
+    ]
+  },
+  {
+    "Question": "OrderBuilder",
+    "Expected": "OrderBuilder.cs",
+    "Kind": "identifier",
+    "FirstStageRank": 2,
+    "Rank": 3,
+    "Ms": 912269,
+    "Top5": [
+      "OrderConfiguration.cs",
+      "OrderTotal.cs",
+      "OrderBuilder.cs",
+      "GetById.cs",
+      "GetByIdWithItemsAsync.cs"
+    ]
+  },
+  {
+    "Question": "ExceptionMiddleware",
+    "Expected": "ExceptionMiddleware.cs",
+    "Kind": "identifier",
+    "FirstStageRank": 1,
+    "Rank": 1,
+    "Ms": 724324,
+    "Top5": [
+      "ExceptionMiddleware.cs",
+      "Program.cs",
+      "EmptyBasketOnCheckoutException.cs",
+      "Error.cshtml.cs",
+      "DuplicateException.cs"
+    ]
+  },
+  {
+    "Question": "CacheHelpers",
+    "Expected": "CacheHelpers.cs",
+    "Kind": "identifier",
+    "FirstStageRank": 1,
+    "Rank": 1,
+    "Ms": 210209,
+    "Top5": [
+      "CacheHelpers.cs",
+      "CachedCatalogViewModelService.cs",
+      "GenerateCatalogItemCacheKey.cs",
+      "GenerateBrandsCacheKey.cs",
+      "GenerateTypesCacheKey.cs"
+    ]
+  },
+  {
+    "Question": "BasketQueryService",
+    "Expected": "BasketQueryService.cs",
+    "Kind": "identifier",
+    "FirstStageRank": 1,
+    "Rank": 1,
+    "Ms": 146821,
+    "Top5": [
+      "BasketQueryService.cs",
+      "BasketViewModelService.cs",
+      "ConfigureCoreServices.cs",
+      "IBasketService.cs",
+      "BasketService.cs"
+    ]
+  }
+]

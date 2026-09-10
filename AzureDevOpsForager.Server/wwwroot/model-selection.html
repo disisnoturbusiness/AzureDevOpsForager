@@ -381,6 +381,76 @@
       better embedding model fixes. Chunking strategy is the open candidate.
     </p>
 
+    <h3 style="margin-top:1.4rem">Experiment 3: which reranker, on identical input</h3>
+
+    <p>
+      The experiment that should have come first. A cross-encoder is a pure function of
+      (query, documents), so handing two of them the <strong>same candidate list</strong> removes the
+      embedder, the index, the fusion weights and the score floors from the comparison entirely.
+      Nothing is left varying but the model. Shortlists came from one retrieval call per question at
+      the same pool depth the server reranks at.
+    </p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead><tr><th>Question&rsquo;s correct answer</th><th>first stage</th><th>bge-v2-m3</th><th>Qwen3-0.6B</th><th>Better</th></tr></thead>
+        <tbody>
+          <tr><td>EmptyBasketOnCheckoutException.cs</td><td class="num">8</td><td class="num">1</td><td class="num">1</td><td>tie</td></tr>
+          <tr><td>ToastComponent.cs</td><td class="num">4</td><td class="num">4</td><td class="num win">1</td><td class="win">Qwen3</td></tr>
+          <tr><td>ImageValidators.cs</td><td class="num">6</td><td class="num">2</td><td class="num win">1</td><td class="win">Qwen3</td></tr>
+          <tr><td>CatalogContextSeed.cs</td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td>tie</td></tr>
+          <tr><td>ExceptionMiddleware.cs</td><td class="num">5</td><td class="num">5</td><td class="num win">1</td><td class="win">Qwen3</td></tr>
+          <tr><td>IdentityTokenClaimService.cs</td><td class="num">18</td><td class="num win">2</td><td class="num">5</td><td>bge</td></tr>
+          <tr><td>GetMyOrdersHandler.cs</td><td class="num">27</td><td class="num">7</td><td class="num win">4</td><td class="win">Qwen3</td></tr>
+          <tr><td>CatalogFilterPaginatedSpecification.cs</td><td class="num">28</td><td class="num">9</td><td class="num win">4</td><td class="win">Qwen3</td></tr>
+          <tr><td>Register.cshtml.cs</td><td class="num">2</td><td class="num win">1</td><td class="num">3</td><td>bge</td></tr>
+          <tr><td>OrderBuilder.cs <em>(identifier)</em></td><td class="num">2</td><td class="num">3</td><td class="num win">1</td><td class="win">Qwen3</td></tr>
+          <tr class="kill"><td>ExceptionMiddleware.cs <em>(identifier)</em></td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td>tie</td></tr>
+          <tr class="kill"><td>CacheHelpers.cs <em>(identifier)</em></td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td>tie</td></tr>
+          <tr class="kill"><td>BasketQueryService.cs <em>(identifier)</em></td><td class="num">1</td><td class="num">1</td><td class="num">1</td><td>tie</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bigstat">
+      <div><b>0.452</b><span>MRR, retrieval alone</span></div>
+      <div><b>+37%</b><span>bge-reranker-v2-m3</span></div>
+      <div><b>+71%</b><span>Qwen3-Reranker-0.6B</span></div>
+    </div>
+
+    <p>
+      Qwen3-Reranker-0.6B takes six questions to bge&rsquo;s two, with five ties, and lifts MRR from
+      <strong>0.452 to 0.772</strong> against bge&rsquo;s 0.618. Same shortlists, same corpus, same
+      questions.
+    </p>
+
+    <p>
+      <strong>This is where the retrieval quality on this corpus actually lives.</strong> Changing the
+      embedding model moved nothing that mattered: no question became retrievable and both controls got
+      substantially worse. Changing the reranker, on byte-identical input, moves MRR by 71%.
+    </p>
+
+    <p>
+      The clearest cases are the ones the first stage nearly lost. GetMyOrdersHandler.cs came out of
+      retrieval at rank 27 and CatalogFilterPaginatedSpecification.cs at 28, both effectively invisible
+      to a user, and Qwen3 pulled them to 4. ExceptionMiddleware.cs sat at 5 and went to 1, where bge
+      left it at 5 and never moved it at all.
+    </p>
+
+    <p>
+      bge is not useless. It still adds 37% over raw retrieval and wins two questions outright,
+      including rescuing IdentityTokenClaimService.cs from 18 to 2 where Qwen3 only managed 5. Across
+      the set it is simply the weaker model. And this settles the question the correction at the top of
+      this page raises: the 0.6B was deployed over the 4B for latency, but on measured retrieval
+      quality it also beats the reranker this project previously shipped.
+    </p>
+
+    <p>
+      Latency is deliberately not scored here. The two models ran on different hardware, roughly 250 ms
+      per query against roughly 140 s, which measures an A10G against a laptop CPU and says nothing
+      about either model.
+    </p>
+
     <h2>What this evidence does not support</h2>
 
     <div class="card caveat">
@@ -400,9 +470,10 @@
             <em>This one is runnable, though</em> — both embedder paths ship in the codebase (local ONNX
             e5-large-v2 at 1024-dim, hosted bge-code-v1 at 1536), so it is two indexes and two harness runs,
             not a dead end. It is an unrun experiment, not an impossible one.</li>
-        <li><strong>There is no model-vs-model A/B on this system's own retrieval quality.</strong> That needs
-            a hand-labelled golden set of ~30 queries against the live index. The harness that produces it is
-            built; the golden set is not yet labelled.</li>
+        <li><strong>The model-vs-model A/B now exists, on 18 questions rather than a full golden set.</strong>
+            Both an embedder and a reranker comparison have been run (Experiments 2 and 3). A larger
+            hand-labelled golden set would tighten the confidence interval; 13 scored questions is enough to
+            separate a 71% MRR gain from a 37% one, and not enough to split hairs.</li>
         <li><strong>Comparing embedders is not a sweep.</strong> Each embedding model requires a full reindex,
             because the query vector must match the stored vector geometry.</li>
       </ul>
