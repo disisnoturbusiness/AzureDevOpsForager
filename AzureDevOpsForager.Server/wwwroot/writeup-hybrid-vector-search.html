@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hybrid code search on Azure SQL and SQL Server 2025, end to end — Azure DevOps Forager</title>
+  <meta name="description" content="Building hybrid semantic + full-text code search on Azure SQL and SQL Server 2025 native VECTOR columns: Roslyn chunking, DiskANN indexing, RRF fusion, cross-encoder reranking, and the two mutually unparseable VECTOR_SEARCH grammars. By Dan Weaver." />
+  <meta name="author" content="Dan Weaver" />
+  <link rel="canonical" href="https://azuredevops.aidataforager.com/writeup-hybrid-vector-search.html" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="Hybrid code search on Azure SQL and SQL Server 2025, end to end" />
+  <meta property="og:description" content="Source files in, ranked answers out. One database, no separate vector store. Including the one place the two platforms genuinely diverge." />
+  <meta property="og:url" content="https://azuredevops.aidataforager.com/writeup-hybrid-vector-search.html" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Hybrid code search on Azure SQL and SQL Server 2025, end to end",
+    "author": { "@type": "Person", "name": "Dan Weaver", "url": "https://www.linkedin.com/in/dan-weaver-1861038" },
+    "datePublished": "2026-09-29",
+    "url": "https://azuredevops.aidataforager.com/writeup-hybrid-vector-search.html",
+    "about": [ "Azure SQL", "SQL Server 2025", "VECTOR data type", "DiskANN", "Vector search",
+               "Reciprocal rank fusion", "Cross-encoder reranking", "Roslyn", "C#", ".NET" ]
+  }
+  </script>
+  <link rel="stylesheet" href="style.css?v=20260929" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
+  <style>
+    .doc { max-width: 820px; margin: 0 auto; padding: 0 20px 72px; }
+    .doc h2 { font-size: 1.35rem; margin: 2.6rem 0 .6rem; letter-spacing: -0.01em; }
+    .doc h3 { font-size: 1.02rem; margin: 1.7rem 0 .5rem; color: var(--acc); letter-spacing: .01em; }
+    .doc p, .doc li { line-height: 1.7; }
+    .doc ul { padding-left: 1.15rem; }
+    .doc li { margin: .4rem 0; }
+    .lede { font-size: 1.06rem; opacity: .92; border-left: 3px solid var(--acc);
+            padding: .1rem 0 .1rem 1rem; margin: 1.2rem 0 1.8rem; }
+    .byline { font-size: .84rem; color: var(--txt-2); margin: .2rem 0 1.4rem; }
+    .card { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--radius); padding: 1.1rem 1.25rem; margin: 1.3rem 0;
+            box-shadow: var(--shadow); }
+    .card.flag { border-color: var(--acc); border-left-width: 3px; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p:first-child { margin-top: 0; }
+    pre.code { background: var(--bg-2); border: 1px solid var(--line);
+               border-radius: var(--radius-sm); padding: .85rem 1rem; overflow-x: auto;
+               font-family: var(--font-mono); font-size: .85rem; line-height: 1.55; margin: 1rem 0; }
+    code, .mono { font-family: var(--font-mono); font-size: .9em; }
+    .doc p code, .doc li code { background: var(--bg-2); border: 1px solid var(--line);
+                                border-radius: 4px; padding: .06rem .3rem; }
+    .toc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+           padding: .9rem 1.2rem; margin: 1.6rem 0 2rem; font-size: .9rem; }
+    .toc ol { margin: .4rem 0 0; padding-left: 1.3rem; }
+    .toc li { margin: .22rem 0; }
+    .backlink { display: inline-block; margin: 1.4rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <h1>Hybrid code search, <span class="accent">end to end</span></h1>
+        <p class="tagline">Azure SQL and SQL Server 2025 &middot; native vectors, DiskANN, RRF, cross-encoder</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="topbar-link" href="/">&larr; Back to search</a>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle light / dark theme" aria-label="Switch to light theme">☀</button>
+    </div>
+  </header>
+
+  <main class="doc">
+
+    <p class="byline">Dan Weaver &middot; 29 September 2026</p>
+
+    <p class="lede">Azure SQL and SQL Server 2025 both have a native <code>VECTOR</code> type, a DiskANN
+    index, and <code>VECTOR_SEARCH</code>. The documentation covers the syntax for each one. It does not
+    cover what happens when you put them together and point them at a real codebase, which is where most
+    of the work turned out to be.</p>
+
+    <p>This is the whole path: source files in, ranked answers out. C# and .NET, one database, no separate
+    vector store. Everything here runs on both platforms, and the one place they genuinely diverge is
+    section 5, which is the section worth reading. The live deployment this came out of is Azure SQL
+    serverless. The same build runs against self-hosted SQL Server 2025 on a workstation.</p>
+
+    <div class="toc">
+      <strong>Contents</strong>
+      <ol>
+        <li><a href="#schema">The schema</a></li>
+        <li><a href="#chunking">Chunking</a></li>
+        <li><a href="#embedding">Embedding</a></li>
+        <li><a href="#diskann">The DiskANN index, and when to build it</a></li>
+        <li><a href="#querying">Querying, and the one place the two platforms diverge</a></li>
+        <li><a href="#fusion">Fusing three legs</a></li>
+        <li><a href="#rerank">Reranking, and why the gate matters more</a></li>
+        <li><a href="#azure">Two things that only bite on Azure SQL serverless</a></li>
+        <li><a href="#rebuild">Rebuilding without downtime</a></li>
+        <li><a href="#different">What I would do differently</a></li>
+      </ol>
+    </div>
+
+    <h2>What you end up with</h2>
+    <p>A query runs three retrieval legs at once. Approximate nearest neighbour over a DiskANN index.
+    Full-text over the chunk table. Full-text over the file table. The three ranked lists get fused with
+    reciprocal rank fusion inside a stored procedure, a cross-encoder reranks the survivors, and a
+    relevance gate throws out results that are nearest-neighbour artifacts rather than answers.</p>
+    <p>Everything lives in one database. That is the point of doing it this way. No Qdrant to run, no sync
+    job, no second thing to back up.</p>
+
+    <h2 id="schema">1. The schema</h2>
+    <p>Two tables. Files, and chunks of files.</p>
+<pre class="code">CREATE TABLE dbo.CodeChunks (
+   Id           INT IDENTITY(1,1) PRIMARY KEY,
+   CodeFileId   INT NOT NULL REFERENCES dbo.CodeFiles(Id) ON DELETE CASCADE,
+   ChunkKey     NVARCHAR(500) NOT NULL UNIQUE,
+   ChunkContent NVARCHAR(MAX) NOT NULL,
+   Embedding    VECTOR(1536) NULL
+);</pre>
+    <p>The dimension is baked into the column type. Change embedding models and you change the schema. Plan
+    for that now, because the failure mode later is silent: a corpus written at 1024 and queried at 1536
+    does not error, it returns nonsense.</p>
+    <p>Write vectors by casting JSON server-side.</p>
+<pre class="code">INSERT INTO dbo.CodeChunks (..., Embedding)
+VALUES (..., CAST(@embedding AS VECTOR(1536)));</pre>
+    <p><code>@embedding</code> is a <code>float[]</code> serialized with <code>System.Text.Json</code>.
+    There is no client-side vector parameter type to reach for.</p>
+
+    <h2 id="chunking">2. Chunking</h2>
+    <p>Fixed-size windows are the obvious approach and they are wrong for code. A window that splits a
+    method in half produces two chunks, neither of which is the method.</p>
+    <p>Use the syntax tree. Roslyn hands you <code>MethodDeclarationSyntax</code> and friends, so chunk on
+    those boundaries.</p>
+    <ul>
+      <li>One shell chunk per type: usings, namespace, XML docs, the declaration line, fields, constants,
+          auto-properties. Method bodies excluded.</li>
+      <li>One chunk per member with a real body.</li>
+      <li>A token budget with a floor and a ceiling. 200 to 400 estimated tokens worked here.</li>
+    </ul>
+    <p>Two cases break the clean rule.</p>
+    <p><strong>Methods over the ceiling.</strong> Split them, but split on top-level
+    <code>StatementSyntax</code> boundaries, never mid-statement. Greedily pack statements until the next
+    one would blow the budget. A chunk that runs slightly fat beats a chunk that lost a line. Prefix each
+    part with a comment carrying the signature and name them <code>Foo~part2of3</code>. The embedding text
+    does not have to be valid C#.</p>
+    <p><strong>Members under the floor.</strong> A three-line property embeds to noise. Coalesce runs of
+    tiny members into one chunk.</p>
+    <p>Then give each chunk roughly fifty tokens of the next chunk's opening, under a marker comment. Cheap
+    continuity, and it means a question whose answer straddles two members still hits one of them.</p>
+    <p>Estimate tokens with word count times a constant rather than running the real tokenizer. This runs
+    once per chunk inside a build that is already slow. It does not need to be exact, it needs to be fast
+    and never under-count.</p>
+
+    <h2 id="embedding">3. Embedding</h2>
+    <p>Two things matter and neither one is the model choice.</p>
+    <p><strong>The dimension is a single global and it has to match everywhere.</strong> If your indexer
+    prefers a local ONNX model and your server prefers a hosted endpoint, and those two have different
+    widths, you will index at one width and query at another. Nothing throws. Put a loud warning at startup
+    when both are configured.</p>
+    <p><strong>A failed parse must throw, not return zeros.</strong> An all-zero vector survives L2
+    normalization untouched, because a magnitude of zero short-circuits, and then produces garbage cosine
+    distances against every row in the table. Validate the length at the source.</p>
+    <p>On batching, measure it. Batching pads every sequence to the longest one in the batch. On a corpus
+    with uneven chunk sizes that lost to one-at-a-time here, roughly three minutes against four and a half.
+    Your corpus may differ. The point is that the obvious optimization is not free.</p>
+    <p>On concurrency, pick the limit from whichever side is the bottleneck. Local model on your machine,
+    parallelize across cores. Remote endpoint, cap at what the server can take. A strong client pointed at
+    a small server makes it thrash and throughput drops.</p>
+
+    <h2 id="diskann">4. The DiskANN index, and when to build it</h2>
+<pre class="code">CREATE VECTOR INDEX IX_CodeChunks_Embedding
+   ON dbo.CodeChunks(Embedding)
+   WITH (metric = 'cosine', type = 'diskann');</pre>
+    <p>Build this after the data is loaded, not alongside the schema. DiskANN needs a meaningful number of
+    non-null vectors before it will build at all.</p>
+    <p>Before you spend an hour embedding, prove the server can actually do this. Do not read
+    <code>ProductVersion</code>, because Azure SQL is evergreen and reports 12.0 forever. Cast a literal
+    instead.</p>
+<pre class="code">SELECT CAST('[1,2,3]' AS VECTOR(3));</pre>
+    <p>Then create a throwaway table with a real DiskANN index on it and drop it. Ten seconds of preflight
+    against an hour of wasted embedding.</p>
+
+    <h2 id="querying">5. Querying, and the one place the two platforms diverge</h2>
+    <p><code>VECTOR_SEARCH</code> has two spellings, and which one you need depends on the DiskANN index
+    build version, not the product. In practice that splits along platform lines: Azure SQL and Fabric
+    build version 3 indexes, self-hosted SQL Server 2025 builds earlier ones.</p>
+<pre class="code">-- version 3 and up (Azure SQL, Fabric)
+SELECT TOP (200) WITH APPROXIMATE ...
+
+-- earlier builds (SQL Server 2025 self-hosted)
+... VECTOR_SEARCH(..., TOP_N = 200)</pre>
+    <p>If you only ever deploy to one of them you can hardcode the right one and stop reading here. If you
+    develop locally and deploy to Azure, which is the normal arrangement, you need both in the same
+    codebase.</p>
+    <p>Send the wrong one and you get Msg 42274. Both spellings are documented. Three things about them are
+    not obvious from the docs.</p>
+
+    <div class="card flag">
+      <p><strong>One.</strong> <code>WITH APPROXIMATE</code> is load-bearing. A bare <code>TOP (200)</code>
+      parses fine and runs fine, and performs an exact kNN scan of the whole table without touching the
+      index. The engine raises a warning, but if your data layer is not surfacing warnings you will never
+      see it. You get correct results, slowly, forever.</p>
+    </div>
+
+    <div class="card flag">
+      <p><strong>Two.</strong> You cannot reliably branch on the version. It comes from
+      <code>JSON_VALUE(sys.vector_indexes.build_parameters, '$.Version')</code>, and self-hosted SQL 2025
+      writes <code>StartId</code>, <code>L</code>, <code>M</code>, <code>R</code> and no
+      <code>Version</code> key at all. A missing key means the older spelling. Default it the other way and
+      every self-hosted install silently degrades to full-text only, which is exactly what happened
+      here.</p>
+    </div>
+
+    <div class="card flag">
+      <p><strong>Three.</strong> Because the two spellings are mutually unparseable, you cannot put them in
+      one procedure body behind an <code>IF</code>. The branch the engine cannot parse fails at compile
+      time. Build both as strings and dispatch with <code>sp_executesql</code>. Treat the version as a hint
+      for which to try first, and catch the failure to try the other.</p>
+    </div>
+
+    <p><code>WITH APPROXIMATE</code> also forces <code>ORDER BY</code> on the distance column alone, so
+    tie-breaking has to happen afterward. Land the hits in a temp table and apply <code>ROW_NUMBER()</code>
+    there. That has a second benefit: it keeps the dynamic SQL out of an <code>INSERT ... EXEC</code>, so
+    callers can still <code>INSERT ... EXEC</code> your procedure, which cannot nest.</p>
+
+    <h2 id="fusion">6. Fusing three legs</h2>
+    <p>Reciprocal rank fusion, k = 60, entirely in T-SQL.</p>
+<pre class="code">  @VectorWeight   * (1.0 / (60 + VectorRank))
++ @ChunkFtsWeight * (1.0 / (60 + ChunkFtsRank))
++ @FileFtsWeight  * (1.0 / (60 + FileFtsRank))</pre>
+    <p>Rank each leg independently, union the candidates, sum the contributions. RRF only needs ranks, so
+    you never have to make a cosine distance and a full-text RANK comparable, which is the thing that makes
+    score-normalization approaches fragile.</p>
+    <p>Keep the three components as separate output columns. You will want them in section 7.</p>
+
+    <h2 id="rerank">7. Reranking, and why the gate matters more</h2>
+    <p>A cross-encoder over the top thirty candidates was the single largest quality win here. Measured
+    against swapping the embedding model, it was not close.</p>
+    <p>But reranking alone does not fix the real failure. Vector search always returns its nearest
+    neighbours, however far away they are. Search for a term your corpus has never seen and you get back
+    five confident-looking files containing none of the words.</p>
+    <p>So gate the results, in three parts.</p>
+    <ul>
+      <li>A relative floor, as a fraction of the top score. This one survives a model swap, because it only
+          depends on the shape of one result set.</li>
+      <li>An absolute floor on the top score itself. This one has to be recalibrated per reranker. Log the
+          observed top score so you can tune it.</li>
+      <li>A higher absolute floor applied only to hits with no lexical corroboration. This is what the
+          separate RRF columns are for. A hit that no full-text leg found should clear a higher bar than
+          one two legs agree on.</li>
+    </ul>
+    <p>When everything fails the gate, return nothing. Empty is the correct answer. Do not fall back to the
+    unfiltered list.</p>
+    <p>One caveat that bit me. If the reranker is unavailable, skip the gate entirely. Otherwise an outage
+    turns into every search returning zero results, which looks like a data problem and is not. Relatedly,
+    when you fall back to the pre-rerank order, emit descending pseudo-scores just under 1.0 rather than
+    zeros. Zeros make an outage indistinguishable from "nothing is relevant."</p>
+
+    <h2 id="azure">8. Two things that only bite on Azure SQL serverless</h2>
+    <p><strong>The database reports 12.0 forever.</strong> Covered in section 4, and it is the reason you
+    capability-test instead of version-check.</p>
+    <p><strong>Full-text is not ready when the connection is.</strong> After a serverless resume, the engine
+    accepts connections before the full-text filter daemon has come up. Your connection-level retry policy
+    never sees this, because the connection succeeded. The command fails instead, and the engine reports it
+    under more than one error number, so match on the message text for "filter daemon" or "FDHost" and
+    retry at the command level. Log the actual <code>SqlException.Number</code> so you can add codes
+    later.</p>
+    <p>Without that retry the affected queries are the <em>first ones after a wake</em>. On a public demo
+    that is every cold visitor, and what they get is the vector leg silently missing.</p>
+
+    <h2 id="rebuild">9. Rebuilding without downtime</h2>
+    <p>Build into <code>CodeFiles_Staging</code> and <code>CodeChunks_Staging</code>, then swap. Generate
+    both table definitions from one parameterized string so live and staging cannot drift.</p>
+    <p>The swap is more steps than you would guess, because the full-text indexes, the vector index and the
+    stored procedure are all bound to the live table's object id. Drop the dependents, rename live out,
+    rename staging in, <code>sp_rename</code> every constraint and index back to the live names, rebuild
+    the dependents.</p>
+    <p>Guard the promotion. If staging holds less than 95% of the files you listed, do not swap. Leave the
+    good index alone and say so in the log. That guard is the entire recovery story: a build that dies
+    partway never becomes live, so recovery is "run it again."</p>
+    <p>Make your unique keys stable across runs. Truncating a long key to fit the column and appending a
+    hash of the full value works, as long as the hash is deterministic. FNV-1a is fine. Do not use
+    <code>GetHashCode</code>, which is randomized per process.</p>
+
+    <h2 id="different">10. What I would do differently</h2>
+    <p>Instrument the build from day one. Every number worth having, stage timings, error counts, how close
+    the staged count came to the promotion threshold, was already computed and written to a console nobody
+    reads. The query side had telemetry in a table. The build side had nothing, so there was no way to
+    answer "is this getting slower."</p>
+    <p>Surface warnings. Two of the worst failures here, the silent full scan and the silent
+    full-text-only degradation, were both things the system knew about and did not say.</p>
+    <p>And measure before you tune. Swapping the embedding model changed recall and did nothing for
+    ranking. The reranker changed everything. I would have guessed the other way around.</p>
+
+    <div class="card">
+      <p>Working code, MIT licensed:
+        <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">github.com/disisnoturbusiness/AzureDevOpsForager</a></p>
+      <p>Four-minute walkthrough:
+        <a href="https://www.loom.com/share/644b73ea68e34ded81a490c82a4cb99f" target="_blank" rel="noopener">loom.com</a>
+        &middot; or <a href="/">run the live search</a>.</p>
+    </div>
+
+    <p class="backlink"><a href="/writeups.html">&larr; All writeups</a></p>
+
+  </main>
+
+  <footer class="foot">
+    <p class="foot-built">
+      Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; remote
+    </p>
+    <p class="foot-links">
+      <a href="/">Live search</a>
+      &middot;
+      <a href="/writeups.html">Writeups</a>
+      &middot;
+      <a href="/model-selection.html">How the models were chosen</a>
+      &middot;
+      <a href="/benchmarks.html">Benchmarks</a>
+      &middot;
+      <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">Source on GitHub</a>
+      &middot;
+      <a href="https://www.linkedin.com/in/dan-weaver-1861038" target="_blank" rel="noopener">LinkedIn</a>
+      &middot;
+      <a href="https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx" target="_blank" rel="noopener">Hugging Face</a>
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var KEY = "adf-theme";
+      var btn = document.getElementById("themeToggle");
+      function apply(t) {
+        var light = (t === "light");
+        if (light) document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        if (btn) {
+          btn.textContent = light ? "☾" : "☀";
+          btn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+      try { apply(localStorage.getItem(KEY) || "dark"); } catch (e) { apply("dark"); }
+      if (btn) btn.addEventListener("click", function () {
+        var next;
+        try { next = (localStorage.getItem(KEY) === "light") ? "dark" : "light"; } catch (e) { next = "dark"; }
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    })();
+  </script>
+</body>
+</html>

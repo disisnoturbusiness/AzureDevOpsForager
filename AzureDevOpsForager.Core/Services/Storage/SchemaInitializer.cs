@@ -393,6 +393,7 @@ CREATE NONCLUSTERED INDEX IX_CodeChunks_Staging_ChunkType ON dbo.CodeChunks_Stag
    {
       await TryExecAsync( connection, UsageEventsDdl, "dbo.UsageEvents create" );
       await TryExecAsync( connection, SiteVisitsDdl, "dbo.SiteVisits create" );
+      await TryExecAsync( connection, IndexRunsDdl, "dbo.IndexRuns create" );
    }
 
    /// <summary>
@@ -413,8 +414,12 @@ IF OBJECT_ID('dbo.SiteVisits','U') IS NULL
 CREATE TABLE dbo.SiteVisits (
    Id          BIGINT IDENTITY(1,1) PRIMARY KEY,
    OccurredUtc DATETIME2(0) NOT NULL CONSTRAINT DF_SiteVisits_OccurredUtc DEFAULT SYSUTCDATETIME(),
-   ClientIp    VARCHAR(45)  NULL
+   ClientIp    VARCHAR(45)  NULL,
+   Path        VARCHAR(200) NULL
 );
+-- Additive, because the table predates the Path column on every deployment that already has rows.
+IF COL_LENGTH('dbo.SiteVisits','Path') IS NULL
+   ALTER TABLE dbo.SiteVisits ADD Path VARCHAR(200) NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_SiteVisits_OccurredUtc' AND object_id=OBJECT_ID('dbo.SiteVisits'))
    CREATE INDEX IX_SiteVisits_OccurredUtc ON dbo.SiteVisits(OccurredUtc DESC) INCLUDE (ClientIp);
 ";
@@ -451,6 +456,44 @@ CREATE TABLE dbo.UsageEvents (
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_UsageEvents_OccurredUtc' AND object_id=OBJECT_ID('dbo.UsageEvents'))
    CREATE INDEX IX_UsageEvents_OccurredUtc ON dbo.UsageEvents(OccurredUtc DESC) INCLUDE (EventType, ResultCount);
+";
+
+   /// <summary>
+   /// One row per index build: how it went, and why it stopped.
+   /// <para>
+   /// The build already computes every value here and writes it to <c>Console.WriteLine</c>, which on a
+   /// desktop run survives until the window closes and on a scheduled run survives not at all. The search
+   /// half of this system has had telemetry since <c>dbo.UsageEvents</c>; the build half had none, so there
+   /// was no way to answer "is indexing getting slower", "are chunk errors climbing", or "when did a build
+   /// last actually promote".
+   /// </para>
+   /// <para>
+   /// The aborted runs are the point, not an afterthought. A run that lists zero files, or stages under the
+   /// 95% promotion threshold, deliberately leaves live untouched and prints one line — correct behaviour,
+   /// and completely invisible an hour later. Outcome is recorded on every exit including failure, so a
+   /// silent streak of refused promotions cannot look like no builds at all.
+   /// </para>
+   /// </summary>
+   private static string IndexRunsDdl => @"
+IF OBJECT_ID('dbo.IndexRuns','U') IS NULL
+CREATE TABLE dbo.IndexRuns (
+   Id                 BIGINT IDENTITY(1,1) PRIMARY KEY,
+   StartedUtc         DATETIME2(0)  NOT NULL,
+   CompletedUtc       DATETIME2(0)  NOT NULL CONSTRAINT DF_IndexRuns_CompletedUtc DEFAULT SYSUTCDATETIME(),
+   DurationMs         INT           NOT NULL,
+   Outcome            VARCHAR(24)   NOT NULL,   -- Promoted | NoFilesListed | BelowThreshold | Cancelled | Failed
+   SourceDescription  NVARCHAR(200) NULL,
+   FilesListed        INT           NOT NULL,
+   FilesStaged        BIGINT        NOT NULL,
+   FetchErrors        INT           NOT NULL,
+   ChunkErrors        INT           NOT NULL,
+   Parallelism        INT           NOT NULL,
+   EmbeddingBackend   VARCHAR(16)   NULL,       -- local-onnx | huggingface | http | none
+   EmbeddingDimension INT           NULL,
+   ErrorMessage       NVARCHAR(400) NULL
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_IndexRuns_StartedUtc' AND object_id=OBJECT_ID('dbo.IndexRuns'))
+   CREATE INDEX IX_IndexRuns_StartedUtc ON dbo.IndexRuns(StartedUtc DESC) INCLUDE (Outcome, FilesStaged, DurationMs);
 ";
 
    /// <summary>

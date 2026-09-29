@@ -108,6 +108,51 @@ public class AzdoIndexerService : IDisposable
    public async Task RunMonthlyAsync( CancellationToken cancellationToken = default )
    {
       var runTimer = System.Diagnostics.Stopwatch.StartNew();
+      var run = new IndexRunRecord { StartedUtc = DateTime.UtcNow, Outcome = "Failed" };
+
+      try
+      {
+         await RunMonthlyCoreAsync( run, cancellationToken );
+
+         if( run.Outcome == "Promoted" )
+         {
+            Console.WriteLine();
+            Console.WriteLine( $"[COMPLETE] Indexed {run.FilesStaged:N0} files (promoted live via staging swap) in {FormatElapsed( runTimer.Elapsed )}" );
+         }
+      }
+      catch( OperationCanceledException )
+      {
+         run.Outcome = "Cancelled";
+         throw;
+      }
+      catch( Exception exception )
+      {
+         run.Outcome = "Failed";
+         run.ErrorMessage = $"{exception.GetType().Name}: {exception.Message}";
+         throw;
+      }
+      finally
+      {
+         runTimer.Stop();
+         run.DurationMs = (int)Math.Min( runTimer.ElapsedMilliseconds, int.MaxValue );
+         run.EmbeddingBackend = DescribeEmbeddingBackend();
+         run.EmbeddingDimension = Config.EmbeddingDimension;
+
+         // Awaited, not fired and forgotten: this process normally exits the moment the build returns, so a
+         // background write would race the exit and lose exactly the rows worth keeping.
+         await UsageTelemetry.RecordIndexRunAsync( _connectionString, run );
+      }
+   }
+
+   /// <summary>
+   /// The build itself. Fills <paramref name="run"/> as each stage produces a number so the caller can file
+   /// a record whether the run promoted, refused to promote, or threw. Every early return sets an Outcome:
+   /// a refused promotion is a result, not an absence of one.
+   /// </summary>
+   /// <param name="run">The record being assembled for this run.</param>
+   /// <param name="cancellationToken">Cancels between stages and inside the embedding loop.</param>
+   private async Task RunMonthlyCoreAsync( IndexRunRecord run, CancellationToken cancellationToken )
+   {
       Console.WriteLine( "[FULL] Starting full reindex..." );
       Console.WriteLine();
 
@@ -117,8 +162,14 @@ public class AzdoIndexerService : IDisposable
       Console.WriteLine( "[STEP 1] Creating fresh staging tables..." );
       await SchemaInitializer.EnsureStagingTablesAsync( _connectionString );
 
+      // Against _connectionString, not Config.SqlConnectionString: only the server ensured these before,
+      // and the indexer is routinely pointed at a different database, so on any DB the server has never
+      // started against, the run record at the end of this method would have had nowhere to land.
+      await SchemaInitializer.EnsureTelemetryTablesAsync( _connectionString );
+
       Console.WriteLine( "[STEP 2] Initializing services..." );
       InitializeServices();
+      run.SourceDescription = _source?.SourceDescription;
 
       Console.WriteLine( $"[STEP 3] Listing files from {_source.SourceDescription}..." );
       var files = await ListFilesWithRetryAsync();
@@ -127,22 +178,33 @@ public class AzdoIndexerService : IDisposable
       if( files.Count == 0 )
       {
          Console.WriteLine( "[ABORT] No files found — live index left untouched (not swapping)." );
+         run.Outcome = "NoFilesListed";
          return;
       }
 
       files = ApplyHostedEmbeddingCap( files );
+      run.FilesListed = files.Count;
       cancellationToken.ThrowIfCancellationRequested();
 
       Console.WriteLine( "[STEP 4] Chunking + embedding files into staging..." );
       _tableSuffix = "_Staging";
-      try { await IndexFilesAsync( files, isFullReindex: true, cancellationToken ); }
+      try
+      {
+         var pass = await IndexFilesAsync( files, isFullReindex: true, cancellationToken );
+         run.FetchErrors = pass.FetchErrors;
+         run.ChunkErrors = pass.ChunkErrors;
+         run.Parallelism = pass.Parallelism;
+      }
       finally { _tableSuffix = ""; }
 
       // Completion guard: never promote a partial build over a good live index.
       var stagedCount = await SchemaInitializer.RowCountAsync( _connectionString, "CodeFiles_Staging" );
+      run.FilesStaged = stagedCount;
+
       if( stagedCount < (long)( files.Count * PromotionThresholdRatio ) )
       {
          Console.WriteLine( $"[ABORT] Only {stagedCount:N0}/{files.Count:N0} files staged (< 95%) — live index left untouched (not swapping)." );
+         run.Outcome = "BelowThreshold";
          return;
       }
 
@@ -150,10 +212,22 @@ public class AzdoIndexerService : IDisposable
       await SchemaInitializer.SwapStagingToLiveAsync( _connectionString );
 
       SaveLastRunTime();
+      run.Outcome = "Promoted";
+   }
 
-      runTimer.Stop();
-      Console.WriteLine();
-      Console.WriteLine( $"[COMPLETE] Indexed {stagedCount:N0} files (promoted live via staging swap) in {FormatElapsed( runTimer.Elapsed )}" );
+   /// <summary>Which embedding path the run actually used, recorded so a run can be compared to the one before it.</summary>
+   private string DescribeEmbeddingBackend()
+   {
+      if( _localEmbed != null )
+         return "local-onnx";
+
+      if( _hfEmbedder != null )
+         return "huggingface";
+
+      if( _embedUrl != null )
+         return "http";
+
+      return "none";
    }
 
    /// <summary>Releases the local ONNX embedding session and the remote HTTP client, whichever was used.</summary>
@@ -327,7 +401,7 @@ public class AzdoIndexerService : IDisposable
    /// exists during a staging build). Fetch failures and chunk/embedding failures are counted and logged
    /// without aborting the run.
    /// </summary>
-   private async Task IndexFilesAsync( List<SourceFileInfo> files, bool isFullReindex, CancellationToken cancellationToken = default )
+   private async Task<(int FetchErrors, int ChunkErrors, int Parallelism)> IndexFilesAsync( List<SourceFileInfo> files, bool isFullReindex, CancellationToken cancellationToken = default )
    {
       int processedCount = 0, fetchErrorCount = 0;
       var chunkErrorCount = new System.Runtime.CompilerServices.StrongBox<int>( 0 );
@@ -391,6 +465,10 @@ public class AzdoIndexerService : IDisposable
       if( fetchErrorCount > 5 ) Console.WriteLine( $"[WARN] ... and {fetchErrorCount - 5} more fetch errors" );
       if( chunkErrorCount.Value > 0 ) Console.WriteLine( $"[WARN] {chunkErrorCount.Value} total chunk/embedding errors" );
       Console.WriteLine( $"         Embedded {processedCount:N0} files" );
+
+      // Handed back rather than logged and dropped: these three are the run's health, and until now the
+      // only record of them was a console line that outlives nothing.
+      return ( fetchErrorCount, chunkErrorCount.Value, degreeOfParallelism );
    }
 
    /// <summary>

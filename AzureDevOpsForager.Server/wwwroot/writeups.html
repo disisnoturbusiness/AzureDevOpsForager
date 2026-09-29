@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Writeups — Azure DevOps Forager</title>
+  <meta name="description" content="Notes from building hybrid semantic code search on Azure SQL and SQL Server 2025 native vectors: what worked, what was measured, and what turned out to be wrong. By Dan Weaver." />
+  <meta name="author" content="Dan Weaver" />
+  <link rel="canonical" href="https://azuredevops.aidataforager.com/writeups.html" />
+  <link rel="stylesheet" href="style.css?v=20260929" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
+  <style>
+    .doc { max-width: 820px; margin: 0 auto; padding: 0 20px 72px; }
+    .doc p { line-height: 1.7; }
+    .lede { font-size: 1.06rem; opacity: .92; border-left: 3px solid var(--acc);
+            padding: .1rem 0 .1rem 1rem; margin: 1.2rem 0 2rem; }
+    .entry { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--radius); padding: 1.15rem 1.3rem; margin: 1.1rem 0;
+             box-shadow: var(--shadow); }
+    .entry h2 { font-size: 1.12rem; margin: 0 0 .35rem; letter-spacing: -0.01em; }
+    .entry h2 a { text-decoration: none; }
+    .entry h2 a:hover { text-decoration: underline; }
+    .entry .meta { font-size: .8rem; color: var(--txt-2); margin: 0 0 .6rem;
+                   font-family: var(--font-mono); }
+    .entry p.sum { margin: 0; font-size: .94rem; color: var(--txt-1); }
+    .tags { margin: .7rem 0 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+    .tags span { font-size: .72rem; color: var(--acc); background: var(--acc-soft);
+                 border: 1px solid var(--line); border-radius: 999px; padding: .1rem .5rem; }
+    .backlink { display: inline-block; margin: 1.6rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <h1><span class="accent">Writeups</span></h1>
+        <p class="tagline">What was built, what was measured, and what turned out to be wrong</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="topbar-link" href="/">&larr; Back to search</a>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle light / dark theme" aria-label="Switch to light theme">☀</button>
+    </div>
+  </header>
+
+  <main class="doc">
+
+    <p class="lede">Notes from building this thing. Working code rather than a survey, and the negative
+    results stay in.</p>
+
+    <article class="entry">
+      <h2><a href="/writeup-hybrid-vector-search.html">Hybrid code search on Azure SQL and SQL Server 2025, end to end</a></h2>
+      <p class="meta">29 Sep 2026 &middot; ~10 min</p>
+      <p class="sum">Source files in, ranked answers out, one database, no separate vector store. Roslyn
+      chunking on statement boundaries, DiskANN, RRF across three retrieval legs, cross-encoder reranking,
+      and a relevance gate. Including the one place the two platforms genuinely diverge:
+      <code>VECTOR_SEARCH</code> has two mutually unparseable grammars and the version key that tells you
+      which to use is missing on self-hosted.</p>
+      <div class="tags">
+        <span>Azure SQL</span><span>SQL Server 2025</span><span>DiskANN</span><span>RRF</span><span>Roslyn</span><span>.NET</span>
+      </div>
+    </article>
+
+    <p class="backlink"><a href="/">&larr; Back to search</a></p>
+
+  </main>
+
+  <footer class="foot">
+    <p class="foot-built">
+      Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; remote
+    </p>
+    <p class="foot-links">
+      <a href="/">Live search</a>
+      &middot;
+      <a href="/model-selection.html">How the models were chosen</a>
+      &middot;
+      <a href="/benchmarks.html">Benchmarks</a>
+      &middot;
+      <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">Source on GitHub</a>
+      &middot;
+      <a href="https://www.linkedin.com/in/dan-weaver-1861038" target="_blank" rel="noopener">LinkedIn</a>
+      &middot;
+      <a href="https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx" target="_blank" rel="noopener">Hugging Face</a>
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var KEY = "adf-theme";
+      var btn = document.getElementById("themeToggle");
+      function apply(t) {
+        var light = (t === "light");
+        if (light) document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        if (btn) {
+          btn.textContent = light ? "☾" : "☀";
+          btn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+      try { apply(localStorage.getItem(KEY) || "dark"); } catch (e) { apply("dark"); }
+      if (btn) btn.addEventListener("click", function () {
+        var next;
+        try { next = (localStorage.getItem(KEY) === "light") ? "dark" : "light"; } catch (e) { next = "dark"; }
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    })();
+  </script>
+</body>
+</html>

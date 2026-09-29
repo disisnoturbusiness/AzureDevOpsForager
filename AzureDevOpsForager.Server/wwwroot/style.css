@@ -1,4 +1,4 @@
-﻿/* ===================================================================
+/* ===================================================================
    Azure DevOps Forager — terminal-luxe dark theme
    100% self-contained: no web fonts, no CDN, no remote assets.
    =================================================================== */
@@ -251,6 +251,55 @@ body::after {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- links ---------- */
+/* There was no base rule for <a>, so any anchor a component did not style fell through to the browser
+   default of #0000EE, which on this background is close to invisible. That was already true of every
+   inline link on benchmarks.html and model-selection.html, not just the writeups. Component rules
+   below are more specific and still win. */
+a { color: var(--acc); text-decoration: none; }
+/* "Back to search" was breaking across three lines in the topbar on every sub-page. */
+.topbar-link { white-space: nowrap; }
+a:hover { text-decoration: underline; }
+.doc p a, .doc li a { text-decoration: underline; text-underline-offset: 2px; }
+.demo-head a { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- demo video ---------- */
+/* Sits above the search panel. aspect-ratio rather than the old padding-top hack so the box reserves
+   its height before the iframe loads and the search form below it does not jump on arrival. */
+.panel-demo { margin-bottom: 1.35rem; }
+.demo-head { margin: 0 0 0.7rem; }
+.demo-head h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--txt-0);
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.demo-len {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--acc);
+  background: var(--acc-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+}
+.demo-head p { margin: 0; font-size: 0.88rem; color: var(--txt-2); }
+.demo-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.demo-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 
 /* ---------- search form ---------- */
 .search-form {

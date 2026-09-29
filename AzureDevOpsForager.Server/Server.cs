@@ -94,8 +94,11 @@ public class Server
    {
       app.Use( async ( context, next ) =>
       {
+         // Any .html document, not just the home page. Writeups and the benchmark pages are landing
+         // pages in their own right now, and lumping them into one undifferentiated count answers
+         // nothing. Asset requests still never match, because css/js/svg are not .html.
          var path = context.Request.Path.Value ?? "";
-         var isDocument = path == "/" || path.Equals( "/index.html", StringComparison.OrdinalIgnoreCase );
+         var isDocument = path == "/" || path.EndsWith( ".html", StringComparison.OrdinalIgnoreCase );
 
          if( isDocument && HttpMethods.IsGet( context.Request.Method ) )
          {
@@ -104,7 +107,7 @@ public class Server
                ? context.Connection.RemoteIpAddress?.ToString()
                : forwarded;
 
-            UsageTelemetry.RecordVisit( clientIp );
+            UsageTelemetry.RecordVisit( clientIp, path == "/" ? "/index.html" : path );
          }
 
          await next();
@@ -464,7 +467,7 @@ public class Server
             try
             {
                await SchemaInitializer.EnsureTelemetryTablesAsync( Config.SqlConnectionString );
-               Console.WriteLine( "[TELEMETRY] dbo.UsageEvents + dbo.SiteVisits ready." );
+               Console.WriteLine( "[TELEMETRY] dbo.UsageEvents + dbo.SiteVisits + dbo.IndexRuns ready." );
             }
             catch( Exception exception )
             {

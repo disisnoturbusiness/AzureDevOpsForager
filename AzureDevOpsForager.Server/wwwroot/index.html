@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -29,7 +29,7 @@
     ]
   }
   </script>
-  <link rel="stylesheet" href="style.css?v=20260910" />
+  <link rel="stylesheet" href="style.css?v=20260929" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -62,6 +62,23 @@
   </header>
 
   <main class="shell">
+    <!-- The walkthrough goes first. A cold arrival - the resume link, an application - has no idea what
+         this indexes or why the ranking is worth looking at, and a bare search box does not tell them.
+         Anyone who arrived FROM the video recognises this frame and scrolls straight past it, which is
+         why the page below is unchanged rather than rewritten to explain itself. -->
+    <section class="panel panel-demo">
+      <div class="demo-head">
+        <h2>See it work <span class="demo-len">4 min</span></h2>
+        <p>Semantic and exact search over <a href="https://github.com/dotnet-architecture/eShopOnWeb" target="_blank" rel="noopener">eShopOnWeb</a>, then a grounded answer off the same index. Or skip it and search below.</p>
+      </div>
+      <div class="demo-frame">
+        <iframe src="https://www.loom.com/embed/644b73ea68e34ded81a490c82a4cb99f"
+                title="Azure DevOps Forager - four minute walkthrough"
+                loading="lazy" allowfullscreen
+                allow="fullscreen; picture-in-picture"></iframe>
+      </div>
+    </section>
+
     <!-- No mode picker. One input: a question gets a grounded answer, anything else gets the ranked
          chunk list. Both render below the form, so the page reads the same either way. -->
     <section class="panel" id="panelSearch" role="tabpanel">
@@ -102,6 +119,8 @@
       </form>
 
       <p class="under-search">
+        <a href="/writeups.html">Writeups</a>
+        &middot;
         <a href="/benchmarks.html">Benchmarks</a>
       </p>
 
@@ -122,6 +141,8 @@
       Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; Michigan, USA &middot; remote
     </p>
     <p class="foot-links">
+      <a href="/writeups.html">Writeups</a>
+      &middot;
       <a href="/model-selection.html">How the models were chosen</a>
       &middot;
       <a href="/benchmarks.html">Benchmarks</a>
@@ -140,6 +161,6 @@
     </p>
   </footer>
 
-  <script src="app.js?v=20260910"></script>
+  <script src="app.js?v=20260929"></script>
 </body>
 </html>

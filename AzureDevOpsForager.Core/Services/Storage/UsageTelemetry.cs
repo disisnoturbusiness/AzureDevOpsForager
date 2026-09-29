@@ -1,8 +1,58 @@
 using System;
+using System.Net;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 
 namespace AzureDevOpsForager.Core.Services.Storage;
+
+/// <summary>
+/// What one index build did: counts, timings, and how it ended. Filled in by the indexer as the run
+/// progresses and handed to <see cref="UsageTelemetry.RecordIndexRunAsync"/> once, at the end.
+/// <para>
+/// A plain mutable bag on purpose. The values become known at different stages — the source description
+/// at service init, the listed count at STEP 3, the error counts at STEP 4, the staged count and outcome
+/// at STEP 5 — and threading thirteen out-parameters back up through the pipeline to build one immutable
+/// object at the bottom would be worse than letting the orchestrator fill this in as it goes.
+/// </para>
+/// </summary>
+public sealed class IndexRunRecord
+{
+   /// <summary>When the build started, UTC.</summary>
+   public DateTime StartedUtc { get; set; }
+
+   /// <summary>Wall-clock duration of the whole run in milliseconds, including a run that aborted early.</summary>
+   public int DurationMs { get; set; }
+
+   /// <summary>Promoted | NoFilesListed | BelowThreshold | Cancelled | Failed.</summary>
+   public string Outcome { get; set; }
+
+   /// <summary>Which source the files came from, as the provider describes itself.</summary>
+   public string SourceDescription { get; set; }
+
+   /// <summary>How many indexable files the source listed, after the hosted-embedding cap.</summary>
+   public int FilesListed { get; set; }
+
+   /// <summary>How many rows actually landed in staging. Compared against <see cref="FilesListed"/> by the promotion guard.</summary>
+   public long FilesStaged { get; set; }
+
+   /// <summary>Files that could not be fetched or threw before chunking.</summary>
+   public int FetchErrors { get; set; }
+
+   /// <summary>Chunks that could not be embedded or written.</summary>
+   public int ChunkErrors { get; set; }
+
+   /// <summary>Degree of parallelism the run chose, which differs for local versus remote embedding.</summary>
+   public int Parallelism { get; set; }
+
+   /// <summary>local-onnx | huggingface | http | none.</summary>
+   public string EmbeddingBackend { get; set; }
+
+   /// <summary>The vector width the corpus was written at. A change here invalidates the whole index.</summary>
+   public int EmbeddingDimension { get; set; }
+
+   /// <summary>Set only when the run threw; type name and message, truncated.</summary>
+   public string ErrorMessage { get; set; }
+}
 
 /// <summary>
 /// Records what the demo is actually being used for, into dbo.UsageEvents.
@@ -20,8 +70,9 @@ namespace AzureDevOpsForager.Core.Services.Storage;
 /// an unacceptable reason to lose a user's query. Nothing downstream reads the return value.
 /// </para>
 /// <para>
-/// Records no client identifier of any kind — no IP, no user agent, no session. See the DDL in
-/// <see cref="SchemaInitializer"/> for why.
+/// dbo.UsageEvents records no client identifier of any kind — no IP, no user agent, no session. See
+/// the DDL in <see cref="SchemaInitializer"/> for why. dbo.SiteVisits is the deliberate exception and
+/// does store the caller's address; see <see cref="RecordVisit(string)"/> for that reasoning.
 /// </para>
 /// </summary>
 public static class UsageTelemetry
@@ -88,14 +139,24 @@ public static class UsageTelemetry
    /// </para>
    /// </summary>
    /// <param name="clientIp">Client address, already extracted from X-Forwarded-For by the caller.</param>
-   public static void RecordVisit( string clientIp )
+   public static void RecordVisit( string clientIp, string path = null )
    {
+      var address = NormalizeIp( clientIp );
+
+      if( IsSyntheticVisit( address ) )
+         return;
+
+      // Recorded because arrivals are no longer all the same arrival. A writeup exists to pull search
+      // traffic, and a single undifferentiated visit count cannot say whether it did.
+      var landedOn = Cap( path, 200 );
+
       Fire( async connection =>
       {
          using var command = new SqlCommand(
-            "INSERT INTO dbo.SiteVisits (ClientIp) VALUES (@ip);", connection );
+            "INSERT INTO dbo.SiteVisits (ClientIp, Path) VALUES (@ip, @path);", connection );
 
-         command.Parameters.AddWithValue( "@ip", (object)NormalizeIp( clientIp ) ?? DBNull.Value );
+         command.Parameters.AddWithValue( "@ip", address );
+         command.Parameters.AddWithValue( "@path", (object)landedOn ?? DBNull.Value );
 
          await command.ExecuteNonQueryAsync();
       } );
@@ -119,6 +180,61 @@ public static class UsageTelemetry
          firstHop = firstHop.Substring( 0, firstHop.IndexOf( ':' ) );
 
       return firstHop.Length > 45 ? firstHop.Substring( 0, 45 ) : firstHop;
+   }
+
+   /// <summary>
+   /// Records one finished index build — promoted, aborted, or failed.
+   /// <para>
+   /// Awaited rather than fire-and-forget, which is the one deliberate departure from the rest of this
+   /// class. A search runs inside a request that outlives the write; a build is the last thing its process
+   /// does, so a background write would race process exit and lose precisely the rows worth having.
+   /// Exceptions are still swallowed — telemetry must never turn a good build into a failed one.
+   /// </para>
+   /// <para>
+   /// Takes the connection string explicitly instead of reading <c>Config.SqlConnectionString</c>, because
+   /// the indexer is routinely pointed at a different database than the server. A local rebuild filing its
+   /// run record into the live demo's table would be worse than not recording it at all.
+   /// </para>
+   /// </summary>
+   /// <param name="connectionString">The database the build wrote to, not necessarily the server's.</param>
+   /// <param name="run">The run to record. Ignored when null.</param>
+   public static async Task RecordIndexRunAsync( string connectionString, IndexRunRecord run )
+   {
+      if( run == null || string.IsNullOrWhiteSpace( connectionString ) )
+         return;
+
+      try
+      {
+         using var connection = new SqlConnection( connectionString );
+         await connection.OpenAsync();
+
+         using var command = new SqlCommand(
+            @"INSERT INTO dbo.IndexRuns
+                 (StartedUtc, DurationMs, Outcome, SourceDescription, FilesListed, FilesStaged,
+                  FetchErrors, ChunkErrors, Parallelism, EmbeddingBackend, EmbeddingDimension, ErrorMessage)
+              VALUES
+                 (@startedUtc, @durationMs, @outcome, @source, @filesListed, @filesStaged,
+                  @fetchErrors, @chunkErrors, @parallelism, @backend, @dimension, @error);", connection );
+
+         command.Parameters.AddWithValue( "@startedUtc", run.StartedUtc );
+         command.Parameters.AddWithValue( "@durationMs", run.DurationMs );
+         command.Parameters.AddWithValue( "@outcome", Cap( run.Outcome, 24 ) ?? "Unknown" );
+         command.Parameters.AddWithValue( "@source", (object)Cap( run.SourceDescription, 200 ) ?? DBNull.Value );
+         command.Parameters.AddWithValue( "@filesListed", run.FilesListed );
+         command.Parameters.AddWithValue( "@filesStaged", run.FilesStaged );
+         command.Parameters.AddWithValue( "@fetchErrors", run.FetchErrors );
+         command.Parameters.AddWithValue( "@chunkErrors", run.ChunkErrors );
+         command.Parameters.AddWithValue( "@parallelism", run.Parallelism );
+         command.Parameters.AddWithValue( "@backend", (object)Cap( run.EmbeddingBackend, 16 ) ?? DBNull.Value );
+         command.Parameters.AddWithValue( "@dimension", run.EmbeddingDimension );
+         command.Parameters.AddWithValue( "@error", (object)Cap( run.ErrorMessage, 400 ) ?? DBNull.Value );
+
+         await command.ExecuteNonQueryAsync();
+      }
+      catch( Exception exception )
+      {
+         Logger.Warn( $"index-run telemetry write failed: {exception.GetType().Name}: {exception.Message}", "Telemetry" );
+      }
    }
 
    /// <summary>Records a thumbs up/down on an answer.</summary>
@@ -151,6 +267,54 @@ public static class UsageTelemetry
    private static bool IsSynthetic( string question )
    {
       return string.Equals( ( question ?? "" ).Trim(), HeartbeatQuery, StringComparison.OrdinalIgnoreCase );
+   }
+
+   /// <summary>
+   /// True when an arrival came from infrastructure rather than a person.
+   /// <para>
+   /// Always On is enabled on this deployment, so App Service GETs "/" from inside the container roughly
+   /// every five minutes, around the clock. Those requests arrive over loopback with no X-Forwarded-For
+   /// and are indistinguishable from a page load at the middleware. The platform health probe on the
+   /// link-local range behaves the same way.
+   /// </para>
+   /// <para>
+   /// This is the rule <see cref="IsSynthetic(string)"/> already applies to the usage table, and its
+   /// absence here did exactly what that method's remarks predict. Measured 2026-09-28: the timer was
+   /// 13,540 of 14,068 rows in dbo.SiteVisits — 96% — against roughly 520 real arrivals across seven
+   /// weeks. Every visit count taken off that table was the timer, not an audience. Rows already written
+   /// are not removed; read them with a loopback filter.
+   /// </para>
+   /// </summary>
+   /// <param name="clientIp">The normalised address, as it would be written to the row.</param>
+   private static bool IsSyntheticVisit( string clientIp )
+   {
+      var text = ( clientIp ?? "" ).Trim();
+
+      // "::ffff:127.0.0.1" is the same loopback wearing an IPv6 hat. Stripped textually because
+      // netstandard2.0 has neither IsIPv4MappedToIPv6 nor MapToIPv4.
+      if( text.StartsWith( "::ffff:", StringComparison.OrdinalIgnoreCase ) )
+         text = text.Substring( 7 );
+
+      // An address that will not parse cannot be attributed to a visitor, so it is not counted as one.
+      if( !IPAddress.TryParse( text, out var address ) )
+         return true;
+
+      if( IPAddress.IsLoopback( address ) || address.IsIPv6LinkLocal )
+         return true;
+
+      // 169.254.0.0/16 — IPv4 link-local, where the App Service health probe lives.
+      var bytes = address.GetAddressBytes();
+      return bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254;
+   }
+
+   /// <summary>Truncates to a column width, mapping null and whitespace to null so the row stores NULL.</summary>
+   private static string Cap( string text, int maxLength )
+   {
+      var trimmed = ( text ?? "" ).Trim();
+      if( trimmed.Length == 0 )
+         return null;
+
+      return trimmed.Length > maxLength ? trimmed.Substring( 0, maxLength ) : trimmed;
    }
 
    /// <summary>Truncates to the column width and normalises null to an empty string.</summary>
