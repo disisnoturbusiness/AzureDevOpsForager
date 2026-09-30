@@ -98,7 +98,15 @@ public class Server
          // pages in their own right now, and lumping them into one undifferentiated count answers
          // nothing. Asset requests still never match, because css/js/svg are not .html.
          var path = context.Request.Path.Value ?? "";
-         var isDocument = path == "/" || path.EndsWith( ".html", StringComparison.OrdinalIgnoreCase );
+
+         // Google's site-ownership token is served as /google<hex>.html and Google re-fetches it
+         // periodically to confirm the site is still ours. It is not a page anyone lands on, so counting
+         // it would put a crawler back into the visit table the loopback filter was added to clean up.
+         var isOwnershipToken = path.StartsWith( "/google", StringComparison.OrdinalIgnoreCase )
+                             && path.EndsWith( ".html", StringComparison.OrdinalIgnoreCase );
+
+         var isDocument = !isOwnershipToken
+                       && ( path == "/" || path.EndsWith( ".html", StringComparison.OrdinalIgnoreCase ) );
 
          if( isDocument && HttpMethods.IsGet( context.Request.Method ) )
          {
