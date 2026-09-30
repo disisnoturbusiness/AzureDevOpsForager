@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# The ownership token is not content. It is served for Google's periodic re-verification
+# and there is no reason for it to appear in anyone's index.
+Disallow: /google38450436c58aea9c.html
+
+Sitemap: https://azuredevops.aidataforager.com/sitemap.xml
