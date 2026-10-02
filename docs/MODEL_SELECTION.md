@@ -10,7 +10,7 @@ Inference Endpoints — or taken from a published benchmark and cited as such.
 |---|---|---|---|
 | Embedding | `BAAI/bge-code-v1` (1536-dim) | TEI | A10G, scale-to-zero |
 | Reranking | `tomaarsen/Qwen3-Reranker-0.6B-seq-cls` | vLLM `+ --enforce-eager` | A10G, scale-to-zero |
-| Answering | `llama-3.3-70b` | Groq | — |
+| Answering | `qwen/qwen3.8-27b` | Groq | Llama family retired by Groq Oct 2026. Chosen on LLMQuorum results: 23.7% correct vs 18.4% for gpt-oss-120b, fewer hallucinations, faster. Settable via GROQ_MODEL |
 
 There is also a fully local path (`e5-large-v2` + `bge-reranker-v2-m3` via ONNX Runtime, no GPU, no
 account, no API cost) behind the same `IEmbedder` / `IReranker` interfaces. Nothing below argues that

@@ -282,7 +282,7 @@ a shipped artifact or sent to a client.
 .NET 10 / .NET Standard 2.0 / .NET Framework 4.8 · ASP.NET Core · WinForms · SQL Server 2025
 (`VECTOR`, `VECTOR_SEARCH`, DiskANN, Full-Text Search) · embeddings + reranking (`bge-code-v1` +
 `Qwen3-Reranker-0.6B` via Hugging Face Inference Endpoints, **or** `e5-large-v2` + `bge-reranker-v2-m3`
-via local ONNX Runtime) · Roslyn · Groq (llama-3.3-70b).
+via local ONNX Runtime) · Roslyn · Groq (qwen/qwen3.8-27b).
 
 ## Documentation
 

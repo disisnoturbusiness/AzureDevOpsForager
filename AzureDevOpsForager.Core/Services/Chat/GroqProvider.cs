@@ -11,7 +11,7 @@ namespace AzureDevOpsForager.Core.Services.Chat;
 /// LLM provider backed by Groq's hosted inference API. This is the concrete implementation
 /// of <see cref="ILLMProvider"/> that the /chat feature talks to when answering questions
 /// about a codebase. Groq is used because its free tier is generous, its responses come back
-/// quickly (roughly 10-15 seconds), and the llama-3.3-70b model it serves is strong on code.
+/// quickly (roughly 10-15 seconds), and the model it serves is strong on code.
 /// The provider is effectively stateless: every request carries its own system prompt and
 /// code context, so nothing needs to be retained between calls.
 /// </summary>
@@ -20,10 +20,42 @@ public class GroqProvider : ILLMProvider
    #region Data Members
 
    /// <summary>
-   /// The Groq-hosted model this provider requests. llama-3.3-70b is the largest general
-   /// model on the free tier and gives the best code-reasoning quality for the price.
+   /// The Groq-hosted model this provider requests, overridable with the GROQ_MODEL environment
+   /// variable.
+   /// <para>
+   /// Was <c>llama-3.3-70b-versatile</c> until Groq retired the entire Llama family. The failure is
+   /// not graceful: the API answers 404 <c>model_not_found</c> and the demo surfaces a red error box
+   /// under a search that otherwise worked, because retrieval succeeds and only the answer step dies.
+   /// A vendor withdrawing a model should cost a setting change and a restart, not a rebuild and a
+   /// redeploy, which is why this is no longer a compile-time constant.
+   /// </para>
+   /// <para>
+   /// Default is <c>qwen/qwen3.8-27b</c>, chosen on measured results rather than on parameter count.
+   /// Across 76 graded seats per model in the LLMQuorum harness it answered 23.7% correct against
+   /// 18.4% for the far larger <c>openai/gpt-oss-120b</c>, hallucinated less (36 against 44) and was
+   /// faster (428 ms against 611 ms). It also beats the retired <c>llama-3.3-70b</c> it replaces
+   /// (17.1%), so this is an upgrade rather than a substitution. The hallucination margin is the
+   /// reason it wins: a grounded code-search answer that invents detail is the worst failure this
+   /// demo has.
+   /// </para>
+   /// <para>
+   /// Those figures are general-knowledge questions answered from memory, not code questions
+   /// answered over retrieved context, so they rank these models against each other rather than
+   /// predicting absolute quality here.
+   /// </para>
+   /// <para>
+   /// Avoid the <c>openai/gpt-oss-*</c> models unless <c>max_tokens</c> is generous. They emit
+   /// reasoning tokens that count against the budget and arrive in a separate <c>reasoning</c>
+   /// field, so a small budget returns EMPTY content with a success status, which reads as a broken
+   /// response rather than a truncated one. The 3000 configured below is clear of it, and
+   /// qwen3.8-27b has no reasoning overhead at all.
+   /// </para>
    /// </summary>
-   private const string GroqModel = "llama-3.3-70b-versatile";
+   private static readonly string GroqModel =
+      System.Environment.GetEnvironmentVariable( "GROQ_MODEL" ) is string configured
+      && !string.IsNullOrWhiteSpace( configured )
+         ? configured
+         : "qwen/qwen3.8-27b";
 
    /// <summary>
    /// Absolute URL of Groq's OpenAI-compatible chat completions endpoint. Kept as a constant

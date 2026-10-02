@@ -50,7 +50,7 @@ end-to-end by the [live demo](https://azuredevops.aidataforager.com) or exercise
 
 | Capability | Implementation | Verified by |
 |------------|----------------|-------------|
-| Groq LLM chat (`llama-3.3-70b`, OpenAI-compatible) | `Core/Services/Chat/GroqProvider.cs` | Demo |
+| Groq LLM chat (`qwen/qwen3.8-27b`, OpenAI-compatible) | `Core/Services/Chat/GroqProvider.cs` | Demo |
 | Grounded RAG — retrieve top chunks, answer from snippets, return sources (`POST /chat`) | `Server/Server.cs:MapChatEndpoints` | Demo |
 | Feedback logging — thumbs up/down (`POST /chat/feedback`) | `Core/Services/Chat/BaseChatService.cs:LogFeedback` | Manual |
 | Known-answers cache (per-user, normalized question) | `BaseChatService.{Add,Check}KnownAnswers` | Manual |
