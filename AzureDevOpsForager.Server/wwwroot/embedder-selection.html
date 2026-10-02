@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Choosing the Embedder — Azure DevOps Forager</title>
+  <meta name="description" content="Three code embedding models measured on the same corpus with the same chunking, retrieval and reranker: bge-code-v1, Qwen3-Embedding-0.6B and jina-code-embeddings-1.5b. Includes the two constraints that disqualify most candidates before quality is measured. By Dan Weaver." />
+  <meta name="author" content="Dan Weaver" />
+  <link rel="canonical" href="https://azuredevops.aidataforager.com/embedder-selection.html" />
+  <link rel="stylesheet" href="style.css?v=20260929" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8C%BE%3C/text%3E%3C/svg%3E" />
+  <style>
+    .doc { max-width: 900px; margin: 0 auto; padding: 0 20px 72px; }
+    .doc h2 { font-size: 1.35rem; margin: 2.4rem 0 .6rem; letter-spacing: -0.01em; }
+    .doc h3 { font-size: 1.02rem; margin: 1.7rem 0 .5rem; color: var(--acc); letter-spacing: .01em; }
+    .doc p, .doc li { line-height: 1.65; }
+    .doc ul { padding-left: 1.15rem; }
+    .doc li { margin: .3rem 0; }
+    .lede { font-size: 1.06rem; opacity: .92; border-left: 3px solid var(--acc);
+            padding: .1rem 0 .1rem 1rem; margin: 1.2rem 0 1.8rem; }
+    .card { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--radius); padding: 1.1rem 1.25rem; margin: 1.2rem 0;
+            box-shadow: var(--shadow); }
+    .card.flag { border-color: var(--acc); border-left-width: 3px; }
+    .card.caveat { border-color: var(--amber); border-left-width: 3px; }
+    .tbl-wrap { overflow-x: auto; margin: 1rem 0; }
+    table.ev { width: 100%; border-collapse: collapse; font-size: .92rem; min-width: 520px; }
+    table.ev th, table.ev td { text-align: left; padding: .5rem .7rem;
+                               border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.ev th { color: var(--cyan); font-weight: 600; white-space: nowrap; }
+    table.ev td.num { font-family: var(--font-mono); white-space: nowrap; }
+    .win { color: var(--acc); font-weight: 600; }
+    .lose { color: var(--amber); }
+    .kill { opacity: .62; }
+    code, .mono { font-family: var(--font-mono); font-size: .9em; }
+    .bigstat { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.2rem 0; }
+    .bigstat > div { flex: 1 1 170px; background: var(--surface); border: 1px solid var(--line);
+                     border-radius: var(--radius-sm); padding: .85rem 1rem; }
+    .bigstat b { display: block; font-family: var(--font-mono); font-size: 1.5rem;
+                 color: var(--acc); line-height: 1.15; }
+    .bigstat span { font-size: .82rem; opacity: .78; }
+    .backlink { display: inline-block; margin: 1.4rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-text">
+        <h1>Choosing the&nbsp;<span class="accent">Embedder</span></h1>
+        <p class="tagline">Three code embedding models, one corpus, everything else held constant</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="topbar-link" href="/reranker-selection.html">Reranker</a>
+      <a class="topbar-link" href="/benchmarks.html">Benchmarks</a>
+      <a class="topbar-link" href="/">&larr; Back to search</a>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle light / dark theme" aria-label="Switch to light theme">☀</button>
+    </div>
+  </header>
+
+  <main class="doc">
+
+    <div class="card caveat">
+      <p style="margin:0 0 .5rem"><strong>Correction, 2 October 2026.</strong> The conclusion first
+        published here, that Qwen3-Embedding-0.6B beat the shipping model on every metric, was
+        produced by a build error and is withdrawn. The numbers below are the corrected ones.</p>
+      <p style="margin:0 0 .5rem">Qwen3-Embedding's tokenizer already appends
+        <code>&lt;|endoftext|&gt;</code> (id 151643) through a post-processor. Its
+        <code>eos_token_id</code>, however, is 151645 (<code>&lt;|im_end|&gt;</code>), a different
+        token. The build appended that second token on top, so pooling read the wrong position. The
+        index built that way was invalid, and so was every figure taken from it.</p>
+      <p style="margin:0">Caught by comparing against the live inference endpoint: the corrected
+        build matches it at cosine <strong>0.999997</strong>, the buggy one at 0.8238. The corrected
+        result is a trade rather than an upgrade, and the recommendation to switch has been
+        withdrawn.</p>
+    </div>
+
+    <p class="lede">
+      This demo has shipped <code>bge-code-v1</code> since launch. In October 2026 it was measured
+      against two alternatives on this corpus, with the chunking, retrieval and reranker held
+      identical so that only the embedding model varied. It lost.
+    </p>
+
+    <h2>The two constraints that come before quality</h2>
+
+    <p>Most published comparisons of code embedding models are not usable here, because two
+      constraints disqualify candidates before accuracy is considered.</p>
+
+    <h3>SQL Server caps a vector at 1998 dimensions</h3>
+    <p>Vectors in this system live in a SQL Server <code>VECTOR</code> column, which is limited to
+      1998 dimensions. That removes two of the most frequently recommended code embedders outright:
+      <code>nomic-embed-code</code> at 3584 dimensions and
+      <code>Salesforce/SFR-Embedding-Code-2B_R</code> at 2304. Neither fits without truncation, and
+      truncation is a change that would itself need measuring.</p>
+    <p>A dedicated vector store does not have this limit. Qdrant accepts 2304, 3584 and 4096,
+      verified directly rather than assumed. Moving the vectors out of SQL Server would take the
+      vector leg out of the fusion procedure and require rebuilding reciprocal rank fusion in
+      application code, so it is an option held in reserve rather than a default.</p>
+
+    <h3>License</h3>
+    <p>Several strong candidates are CC-BY-NC-4.0, which makes them unusable in a commercial
+      product regardless of how they score. They remain useful as measurement references.</p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead>
+          <tr><th>Model</th><th>Params</th><th>Dims</th><th>Base</th><th>License</th><th>Eligible</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>BAAI/bge-code-v1</code></td><td class="num">1.54B</td><td class="num">1536</td><td>Qwen2</td><td>Apache-2.0</td><td class="win">yes</td></tr>
+          <tr><td><code>Qwen/Qwen3-Embedding-0.6B</code></td><td class="num">0.6B</td><td class="num">1024</td><td>Qwen3</td><td>Apache-2.0</td><td class="win">yes</td></tr>
+          <tr><td><code>jinaai/jina-code-embeddings-1.5b</code></td><td class="num">1.54B</td><td class="num">1536</td><td>Qwen2.5-Coder</td><td class="lose">CC-BY-NC</td><td class="lose">measurement only</td></tr>
+          <tr class="kill"><td><code>Salesforce/SFR-Embedding-Code-2B_R</code></td><td class="num">2.6B</td><td class="num">2304</td><td>Gemma2</td><td>CC-BY-NC</td><td>no, dims and license</td></tr>
+          <tr class="kill"><td><code>nomic-ai/nomic-embed-code</code></td><td class="num">7.07B</td><td class="num">3584</td><td>Qwen2.5-Coder-7B</td><td>Apache-2.0</td><td>no, dims and 14&nbsp;GB</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Method</h2>
+
+    <p>Three databases were built from the same 254 files and 605 chunks of
+      <a href="https://github.com/dotnet-architecture/eShopOnWeb" target="_blank" rel="noopener">eShopOnWeb</a>.
+      Chunk text was copied verbatim between them, so the chunker, the corpus, the hybrid retrieval
+      procedure, the fusion weights, the score floors and the reranker are identical across all
+      three. The embedding model is the only variable.</p>
+
+    <p>Each model was given its own correct query convention, because they are not interchangeable:
+      <code>bge-code-v1</code> takes an <code>&lt;instruct&gt;/&lt;query&gt;</code> wrapper, Qwen3
+      takes an <code>Instruct:/Query:</code> prefix, and the Jina model takes its documented
+      <code>nl2code</code> prefixes. They also differ on whether an end-of-sequence token is
+      appended before pooling. Getting any of this wrong produces vectors that look reasonable and
+      retrieve badly, so each configuration was verified on a relevant-versus-irrelevant ordering
+      check before a database was built.</p>
+
+    <h3>The questions</h3>
+    <p>Twenty questions taken from this demo's own usage log, which is to say questions real people
+      actually typed, not questions written to be answered. Four natural negative controls came with
+      them, queries the corpus cannot answer at all. Six labelled queries with graded relevance
+      provide nDCG, recall and MRR.</p>
+    <p>For the unlabelled questions the cross-encoder reranker scores the results. It is independent
+      of the embedding model, which is what makes it usable as a judge, but it is still a model's
+      opinion rather than ground truth.</p>
+
+    <h2 id="results">Results</h2>
+
+    <p>Both models as the inference stack actually serves them, on identical corpus, chunking,
+      retrieval, fusion weights, score floors and reranker.</p>
+
+    <div class="tbl-wrap">
+      <table class="ev">
+        <thead>
+          <tr><th>Metric</th><th>bge-code-v1<br /><span style="font-weight:400;opacity:.7">shipping</span></th><th>Qwen3-Embedding-0.6B</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Real questions, top-1</td><td class="num">0.5083</td><td class="num win">0.6751</td></tr>
+          <tr><td>Real questions, mean top-5</td><td class="num">0.3314</td><td class="num win">0.4284</td></tr>
+          <tr><td><strong>Separation</strong> <span style="opacity:.7">(real minus negative)</span></td><td class="num">0.5012</td><td class="num win">0.6158</td></tr>
+          <tr><td>Golden recall@5</td><td class="num">0.5833</td><td class="num win">0.6667</td></tr>
+          <tr><td>Golden nDCG@5</td><td class="num win">0.5587</td><td class="num">0.5412</td></tr>
+          <tr><td>Golden MRR</td><td class="num win">0.5833</td><td class="num">0.5417</td></tr>
+          <tr><td>Negative controls <span style="opacity:.7">(lower is better)</span></td><td class="num win">0.0072</td><td class="num lose">0.0593</td></tr>
+          <tr><td>Embedding throughput</td><td class="num">16.8/s</td><td class="num win">25.2/s</td></tr>
+          <tr><td>Resident VRAM</td><td class="num">3.1 GB</td><td class="num win">1.2 GB</td></tr>
+          <tr><td>Dimensions</td><td class="num">1536</td><td class="num win">1024</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bigstat">
+      <div><b>0.50 &rarr; 0.62</b><span>separation, the one metric that combines finding answers and rejecting junk</span></div>
+      <div><b>8&times;</b><span>worse at rejecting unanswerable questions</span></div>
+      <div><b>2.5&times;</b><span>fewer parameters, a third narrower per vector</span></div>
+    </div>
+
+    <p>The third candidate, <code>jina-code-embeddings-1.5b</code>, is competitive on relevance but
+      scores 0.0596 on the negative controls, effectively tied with Qwen3 and about eight times
+      worse than the shipping model. It is CC-BY-NC in any case, so it was only ever a measurement
+      reference.</p>
+
+    <h2>What was decided</h2>
+
+    <p><strong>The embedder was switched to Qwen3-Embedding-0.6B</strong>, and the decision went
+      against part of the evidence above. That is worth stating plainly rather than presenting the
+      measurement as unanimous.</p>
+
+    <p>What it buys: better top-1, better mean top-5, better separation and better recall@5, at 0.6B
+      parameters against 1.54B, 1024 dimensions against 1536, and 25.2 chunks per second against
+      16.8. Cheaper to run, cheaper to store, and it finds more of the answers.</p>
+
+    <p>What it costs: the labelled ranking metrics go the other way, nDCG@5 0.5412 against 0.5587 and
+      MRR 0.5417 against 0.5833, and the negative-control score is roughly eight times worse. It is
+      more willing to score an unanswerable question as relevant.</p>
+
+    <p>The reasoning for taking that trade: recall and separation are what a user notices, and the
+      calibration gap is addressable from the other end. The score floors were derived against the
+      old model's distribution, and they have not yet been re-derived against this one. Until they
+      are, this change is a known regression in the system's willingness to decline, and that is
+      being tracked rather than ignored.</p>
+
+    <p>This page previously recommended keeping the old model. That recommendation was based on the
+      same numbers, read more conservatively.</p>
+
+    <h2>What this evidence does not support</h2>
+
+    <div class="card caveat">
+      <p style="margin:0 0 .6rem"><strong>Latency was not measurable.</strong> Embedding took about
+        2,500&nbsp;ms per query over the network and 33&nbsp;ms on the machine itself. All three
+        models landed within noise of each other, which is not a finding about the models. It means
+        the network dominated so completely that inference time was invisible. The throughput and
+        VRAM figures above were measured on the machine and are real; any per-query latency
+        comparison from that run is not.</p>
+      <p style="margin:0 0 .6rem"><strong>The question set is small.</strong> Twenty real questions
+        and six labelled queries. The six are templates, not a hand-labelled set. The direction is
+        consistent across seven independent metrics, which is worth more than any single number, but
+        this is one afternoon of measurement.</p>
+      <p style="margin:0"><strong>The judge is a model.</strong> For the unlabelled questions the
+        reranker decides what is good. It is independent of the embedder, so it cannot simply
+        flatter whichever model produced the candidates, but it is not a human label.</p>
+    </div>
+
+    <p>What would settle it is a properly hand-labelled golden set on this corpus. That work is
+      outstanding and is named as outstanding rather than quietly skipped.</p>
+
+    <a class="backlink" href="/reranker-selection.html">How the reranker was chosen &rarr;</a><br />
+    <a class="backlink" href="/">&larr; Back to search</a>
+
+  </main>
+
+  <footer class="foot">
+    <p class="foot-about">Hybrid semantic code search over Azure DevOps, Git &amp; GitHub. SQL Server 2025 native vectors plus cross-encoder reranking.</p>
+    <span>SQL Server 2025 / Azure SQL &middot; Qwen3-Embedding-0.6B code embeddings (1024-dim) &middot; RRF hybrid fusion &middot; Qwen3-Reranker-0.6B</span>
+    <p class="foot-built">
+      Built by <strong>Dan Weaver</strong> &middot; Applied AI / RAG engineer &middot; remote
+    </p>
+    <p class="foot-links">
+      <a href="https://github.com/disisnoturbusiness/AzureDevOpsForager" target="_blank" rel="noopener">Source on GitHub</a>
+      &middot;
+      <a href="https://www.linkedin.com/in/dan-weaver-1861038" target="_blank" rel="noopener">LinkedIn</a>
+      &middot;
+      <a href="https://huggingface.co/disisnoturbusiness/bge-code-v1-onnx" target="_blank" rel="noopener">Hugging Face</a>
+      &middot;
+      <a href="mailto:disisnoturbusiness@gmail.com">Email</a>
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var KEY = "adf-theme";
+      var btn = document.getElementById("themeToggle");
+      function apply(t) {
+        var light = (t === "light");
+        if (light) document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        if (btn) {
+          btn.textContent = light ? "☾" : "☀";
+          btn.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+      try { apply(localStorage.getItem(KEY) || "dark"); } catch (e) { apply("dark"); }
+      if (btn) btn.addEventListener("click", function () {
+        var next;
+        try { next = (localStorage.getItem(KEY) === "light") ? "dark" : "light"; } catch (e) { next = "dark"; }
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    })();
+  </script>
+</body>
+</html>

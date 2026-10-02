@@ -363,11 +363,13 @@ public class AzdoIndexerService : IDisposable
       else if( Config.HuggingFaceEnabled )
       {
          _hfEmbedder = new HuggingFaceEmbedder( Config.HuggingFaceEmbedUrl, Config.HuggingFaceToken );
-         Console.WriteLine( "         Embeddings: HUGGING FACE endpoint" );
+         Console.WriteLine( $"         Embeddings: {DescribeEndpoint( Config.HuggingFaceEmbedUrl )}" );
          // The HF endpoint is scale-to-zero, so send the warm-up heartbeat NOW — the moment services come up,
          // before file listing — so its GPU spins up while the rest of setup runs. STEP 4 waits on this.
          var warmupStart = DateTime.Now;
-         Console.WriteLine( "         Sending warm-up heartbeat to Hugging Face endpoint (waking scale-to-zero GPU)..." );
+         Console.WriteLine( IsLocalEndpoint( Config.HuggingFaceEmbedUrl )
+            ? "         Sending warm-up heartbeat to the local endpoint..."
+            : "         Sending warm-up heartbeat to Hugging Face endpoint (waking scale-to-zero GPU)..." );
          _hfWarmup = Task.Run( async () =>
          {
             try
@@ -387,7 +389,7 @@ public class AzdoIndexerService : IDisposable
          _embedHttp = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes( 3 ) };
          var embedBase = Config.EmbeddingServiceUrl.TrimEnd( '/' );
          _embedUrl = embedBase + "/embed";
-         Console.WriteLine( "         Embeddings: REMOTE (hosted service)" );
+         Console.WriteLine( $"         Embeddings: {DescribeEndpoint( _embedUrl )}" );
       }
       else
       {
@@ -672,4 +674,49 @@ public class AzdoIndexerService : IDisposable
    }
 
    #endregion Private Methods
+
+   #region Private Methods
+
+   /// <summary>
+   /// True when an embedding endpoint points at this machine or the local network rather than a paid
+   /// hosted service. Used only to label log output, never to change behaviour.
+   /// </summary>
+   /// <param name="url">The configured endpoint URL; may be null or blank.</param>
+   /// <returns>True for localhost, a .lan/.local name, or an RFC1918 address.</returns>
+   private static bool IsLocalEndpoint( string url )
+   {
+      if( string.IsNullOrWhiteSpace( url ) )
+         return false;
+      if( !Uri.TryCreate( url, UriKind.Absolute, out var parsed ) )
+         return false;
+      var host = parsed.Host.ToLowerInvariant();
+      return host == "localhost"
+          || host == "127.0.0.1"
+          || host.EndsWith( ".lan" )
+          || host.EndsWith( ".local" )
+          || host.StartsWith( "192.168." )
+          || host.StartsWith( "10." )
+          || host.StartsWith( "172.16." );
+   }
+
+   /// <summary>
+   /// Builds the one-line "Embeddings:" banner so the operator can see at a glance whether this run is
+   /// spending money. A local endpoint is free; anything else is billed per wake.
+   /// </summary>
+   /// <param name="url">The endpoint the embedder will actually call.</param>
+   /// <returns>A human-readable description including the host.</returns>
+   private static string DescribeEndpoint( string url )
+   {
+      if( string.IsNullOrWhiteSpace( url ) )
+         return "NONE";
+      var host = Uri.TryCreate( url, UriKind.Absolute, out var parsed ) ? parsed.Authority : url;
+      if( IsLocalEndpoint( url ) )
+         return $"LOCAL SERVER -> {host}  (free)";
+      if( host.Contains( "huggingface" ) )
+         return $"HUGGING FACE -> {host}  (BILLED per wake)";
+      return $"REMOTE -> {host}  (BILLED if it proxies to a hosted model)";
+   }
+
+   #endregion Private Methods
+
 }

@@ -355,6 +355,27 @@ public static class Config
    }
 
    /// <summary>
+   /// Reads an integer setting from an environment variable, falling back to the supplied default when the
+   /// variable is absent or unparseable.
+   /// <para>
+   /// Same reasoning as <see cref="ReadEnvDouble"/>: a value that must change together with a deployed model
+   /// does not belong in a code constant. <see cref="EmbeddingDimension"/> in particular has to match the
+   /// embedding model exactly, and every other per-deployment setting on the hosted Server is already an
+   /// environment variable, so leaving this one compiled in meant an embedder swap needed a code change and
+   /// a redeploy rather than a setting change and a restart.
+   /// </para>
+   /// </summary>
+   /// <param name="name">Environment variable name to read.</param>
+   /// <param name="fallback">Value to use when the variable is missing or not a valid integer.</param>
+   /// <returns>The parsed value, or <paramref name="fallback"/>.</returns>
+   private static int ReadEnvInt( string name, int fallback )
+   {
+      var raw = System.Environment.GetEnvironmentVariable( name );
+      return int.TryParse( raw, System.Globalization.NumberStyles.Integer,
+         System.Globalization.CultureInfo.InvariantCulture, out var parsed ) ? parsed : fallback;
+   }
+
+   /// <summary>
    /// Path to the bge-reranker-v2-m3 cross-encoder ONNX model (its sentencepiece.bpe.model is expected
    /// alongside). A blank value disables reranking entirely.
    /// </summary>
@@ -387,11 +408,20 @@ public static class Config
 
    /// <summary>
    /// Dimensionality of the embedding vectors stored in the index; must match the embedding model in use
-   /// (bge-code-v1 = 1536, the hosted default; the lightweight local E5-large-v2 = 1024). This value flows
-   /// into the VECTOR(n) column DDL, the DiskANN index, and the SearchCode procedure's parameter, so
+   /// (bge-code-v1 = 1536; Qwen3-Embedding-0.6B = 1024; the lightweight local E5-large-v2 = 1024). This value
+   /// flows into the VECTOR(n) column DDL, the DiskANN index, and the SearchCode procedure's parameter, so
    /// changing the embedding model means changing this AND running a full reindex.
+   /// <para>
+   /// Settable through the EMBEDDING_DIMENSION environment variable so the hosted Server can follow an
+   /// endpoint swap without a rebuild, matching how HUGGINGFACE_EMBED_URL and RERANKER_MODEL_NAME already
+   /// work. config.json still wins over the variable where one is present.
+   /// </para>
+   /// <para>
+   /// A mismatch between this and the deployed index is not a soft failure: the stored VECTOR(n) column and
+   /// the procedure parameter must agree, so the wrong value makes every query error rather than degrade.
+   /// </para>
    /// </summary>
-   public static int EmbeddingDimension { get; set; } = 1536;
+   public static int EmbeddingDimension { get; set; } = ReadEnvInt( "EMBEDDING_DIMENSION", 1536 );
 
    /// <summary>
    /// Azure DevOps organization URL, e.g. https://dev.azure.com/your-org. Seeded from the environment via
