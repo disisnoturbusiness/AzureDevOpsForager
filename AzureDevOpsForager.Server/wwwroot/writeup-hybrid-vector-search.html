@@ -116,14 +116,14 @@
    CodeFileId   INT NOT NULL REFERENCES dbo.CodeFiles(Id) ON DELETE CASCADE,
    ChunkKey     NVARCHAR(500) NOT NULL UNIQUE,
    ChunkContent NVARCHAR(MAX) NOT NULL,
-   Embedding    VECTOR(1536) NULL
+   Embedding    VECTOR(1024) NULL
 );</pre>
     <p>The dimension is baked into the column type. Change embedding models and you change the schema. Plan
     for that now, because the failure mode later is silent: a corpus written at 1024 and queried at 1536
     does not error, it returns nonsense.</p>
     <p>Write vectors by casting JSON server-side.</p>
 <pre class="code">INSERT INTO dbo.CodeChunks (..., Embedding)
-VALUES (..., CAST(@embedding AS VECTOR(1536)));</pre>
+VALUES (..., CAST(@embedding AS VECTOR(1024)));</pre>
     <p><code>@embedding</code> is a <code>float[]</code> serialized with <code>System.Text.Json</code>.
     There is no client-side vector parameter type to reach for.</p>
 
