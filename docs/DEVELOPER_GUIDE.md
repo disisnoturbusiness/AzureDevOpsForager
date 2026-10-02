@@ -318,6 +318,8 @@ The net effect: a recipient can run **zero-local-ONNX** (point at HF — no ~1.3
 
 `HuggingFaceEmbedder` (and `HuggingFaceReranker`) POST through `PostWithWarmupRetryAsync`, which tolerates the transient statuses a scale-to-zero HF endpoint returns while its GPU spins up — **503, 429, 409, 500, 502, 504**. It backs off (2s → 10s, capped) for up to **30 attempts (~5 minutes)** so a cold endpoint warms rather than failing every chunk. A genuine error (e.g. 401 bad token, 400 bad request) is **not** transient and throws immediately via `EnsureSuccessStatusCode()`. In the reranker this failure is caught and degrades fail-soft; in the embedder it propagates (a chunk that can't embed is counted and skipped by the indexer).
 
+**The reranker's loop is bounded by a 150-second total time budget**, not just the attempt count. Azure App Service's front end abandons a request at ~230 s with a 504, and the unbounded loop outlived it: on 2026-10-02 the endpoint sat in "Waiting for requested hardware" and every search returned 504 instead of reaching the fail-soft fallback. A Stopwatch covers in-flight time and backoff sleeps alike; each attempt also gets its own deadline (60 s, or whatever budget remains) through a linked `CancellationTokenSource`, and a hung attempt is retried like a 503. When the budget runs out the loop throws a `TimeoutException` naming the last failure, which `RerankAsync` reports and turns into retrieval order. Only the caller's own cancellation propagates. Covered by `HuggingFaceRerankerTests`. The embedder's loop is still unbounded.
+
 ---
 
 ## 5. Configuration & Override Layering
@@ -568,4 +570,4 @@ client → POST /chat {question}
 
 ---
 
-*Every load-bearing constant (the `EmbeddingDimension`-driven vector size — 1536 default, 1024 local e5 — RRF 1/(60+rank), the 95% swap guard, the 512-token local-model cap, the fairseq +1 offset, the 0.5 max cosine distance, the 30-candidate rerank pool, the 1000-file hosted cap, the ~5-min / 30-attempt HF warm-up retry) is defined in `Config.cs`, `SchemaInitializer.cs`, `EmbeddingService.cs`, `BgeReranker.cs`, or the HF classes (`HuggingFaceEmbedder.cs`, `HuggingFaceReranker.cs`) — grep there before changing behavior.*
+*Every load-bearing constant (the `EmbeddingDimension`-driven vector size — 1536 default, 1024 local e5 — RRF 1/(60+rank), the 95% swap guard, the 512-token local-model cap, the fairseq +1 offset, the 0.5 max cosine distance, the 30-candidate rerank pool, the 1000-file hosted cap, the ~5-min / 30-attempt HF warm-up retry, capped at 150 s in the reranker) is defined in `Config.cs`, `SchemaInitializer.cs`, `EmbeddingService.cs`, `BgeReranker.cs`, or the HF classes (`HuggingFaceEmbedder.cs`, `HuggingFaceReranker.cs`) — grep there before changing behavior.*

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -23,8 +24,12 @@ namespace AzureDevOpsForager.Core.Services.Reranking;
 /// and the older TEI shape [{index,score}], so either serving stack works.
 ///
 /// Fail-soft per the interface contract: any error returns the candidates in their original retrieval
-/// order, truncated to topK, and never throws (except honoring cancellation). Lets ranking run with zero
-/// local ONNX (no reranker model loaded in-process).
+/// order, truncated to topK, and never throws (except honoring the caller's cancellation). Lets ranking
+/// run with zero local ONNX (no reranker model loaded in-process).
+///
+/// "Any error" includes running out of time. The warm-up retry loop is bounded by a total time budget
+/// (<see cref="DefaultTotalBudget"/>) so a stuck endpoint degrades to retrieval order while the visitor's
+/// request is still alive, rather than after the hosting front end has already given up on it.
 /// </summary>
 public class HuggingFaceReranker : IReranker
 {
@@ -43,8 +48,45 @@ public class HuggingFaceReranker : IReranker
    /// </summary>
    private const string PromptSuffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
 
-   /// <summary>Shared client pre-loaded with the bearer Authorization header and a request timeout.</summary>
+   /// <summary>
+   /// The most wall-clock time one rerank call may spend on the endpoint, counting every attempt, the
+   /// time each request is in flight, and every backoff sleep between them.
+   /// <para>
+   /// Azure App Service's front end abandons a request at roughly 230 seconds and hands the visitor a 504.
+   /// The retry loop used to allow 30 attempts with a 2-minute HttpClient timeout each, which is well over
+   /// five minutes in the worst case. On 2026-10-02 the endpoint sat in "Waiting for requested hardware"
+   /// (no A10G free in the region) and every search returned 504 GatewayTimeout: the loop was still
+   /// patiently retrying when Azure cut the connection, so the fail-soft path below never got to run.
+   /// </para>
+   /// <para>
+   /// 150 seconds leaves about 80 seconds of that 230 for everything else in the request: query
+   /// embedding, the full-text and vector legs, and writing the response. It is still long enough to ride
+   /// out an ordinary scale-from-zero wake, and the request that hits the budget has already triggered
+   /// that wake, so the next search gets reranked even when this one does not.
+   /// </para>
+   /// </summary>
+   private static readonly TimeSpan DefaultTotalBudget = TimeSpan.FromSeconds( 150 );
+
+   /// <summary>
+   /// The longest a single attempt may wait for a response before it is abandoned and counted as a
+   /// transient failure. A warm endpoint answers in a few seconds; a request that hangs for a minute is a
+   /// stuck endpoint, and retrying it is cheaper than letting one silent request eat the whole budget.
+   /// Never longer than what remains of <see cref="DefaultTotalBudget"/>.
+   /// </summary>
+   private static readonly TimeSpan DefaultAttemptTimeout = TimeSpan.FromSeconds( 60 );
+
+   /// <summary>
+   /// Shared client pre-loaded with the bearer Authorization header. Its own Timeout is infinite on
+   /// purpose: every attempt carries its own deadline through a CancellationTokenSource, and a second,
+   /// independent timeout would surface as an OperationCanceledException the caller never asked for.
+   /// </summary>
    private readonly HttpClient _httpClient;
+
+   /// <summary>Total time budget for one rerank call; see <see cref="DefaultTotalBudget"/>.</summary>
+   private readonly TimeSpan _totalBudget;
+
+   /// <summary>Per-attempt response deadline; see <see cref="DefaultAttemptTimeout"/>.</summary>
+   private readonly TimeSpan _attemptTimeout;
 
    /// <summary>The URL requests are POSTed to: base + "/rerank" for Jina-style servers, base itself for the toolkit.</summary>
    private readonly string _rerankUrl;
@@ -71,14 +113,33 @@ public class HuggingFaceReranker : IReranker
    /// <summary>
    /// Creates a reranker bound to a HF endpoint URL and bearer token. The route and request envelope depend
    /// on <see cref="Config.RerankerApiFormat"/>: "toolkit" posts to the base URL, anything else appends
-   /// "/rerank".
+   /// "/rerank". Uses the production time limits, <see cref="DefaultTotalBudget"/> and
+   /// <see cref="DefaultAttemptTimeout"/>.
    /// </summary>
    public HuggingFaceReranker( string endpointUrl, string token )
+      : this( endpointUrl, token, new HttpClientHandler(), DefaultTotalBudget, DefaultAttemptTimeout )
+   {
+   }
+
+   /// <summary>
+   /// Creates a reranker over a caller-supplied message handler and explicit time limits. This is the
+   /// seam the unit tests use to stand in a fake endpoint (one that returns 503 forever, or never answers
+   /// at all) and to prove the budget in seconds rather than minutes. The client takes ownership of the
+   /// handler and disposes it with itself.
+   /// </summary>
+   /// <param name="endpointUrl">The endpoint's base URL; "/rerank" is appended unless the format is "toolkit".</param>
+   /// <param name="token">The bearer token, or null/blank to send no Authorization header.</param>
+   /// <param name="handler">The HTTP message handler every request is sent through.</param>
+   /// <param name="totalBudget">The most wall-clock time one rerank call may spend across all attempts.</param>
+   /// <param name="attemptTimeout">The longest one attempt may wait for a response.</param>
+   public HuggingFaceReranker( string endpointUrl, string token, HttpMessageHandler handler, TimeSpan totalBudget, TimeSpan attemptTimeout )
    {
       _useToolkitFormat = string.Equals( Config.RerankerApiFormat, "toolkit", StringComparison.OrdinalIgnoreCase );
       var baseUrl = endpointUrl?.TrimEnd( '/' ) ?? "";
       _rerankUrl = _useToolkitFormat ? baseUrl : baseUrl + "/rerank";
-      _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes( 2 ) };
+      _totalBudget = totalBudget;
+      _attemptTimeout = attemptTimeout;
+      _httpClient = new HttpClient( handler ) { Timeout = Timeout.InfiniteTimeSpan };
       if( !string.IsNullOrWhiteSpace( token ) )
          _httpClient.DefaultRequestHeaders.Add( "Authorization", "Bearer " + token );
    }
@@ -89,7 +150,8 @@ public class HuggingFaceReranker : IReranker
 
    /// <summary>
    /// Rescores the candidates via the hosted cross-encoder and returns the top-K by descending score. On any
-   /// failure it returns the input order truncated to topK (fail-soft); cancellation is honored.
+   /// failure, including the time budget running out, it returns the input order truncated to topK
+   /// (fail-soft). Only the caller's own cancellation propagates.
    /// </summary>
    public async Task<IReadOnlyList<RerankerResult>> RerankAsync(
       string query, IReadOnlyList<RerankerCandidate> candidates, int topK, CancellationToken cancellationToken = default )
@@ -125,8 +187,11 @@ public class HuggingFaceReranker : IReranker
 
          return scored.OrderByDescending( result => result.Score ).Take( topK ).ToList();
       }
-      catch( OperationCanceledException )
+      catch( OperationCanceledException ) when( cancellationToken.IsCancellationRequested )
       {
+         // Only the CALLER's cancellation propagates. A timeout is also an OperationCanceledException, and
+         // rethrowing those unfiltered is how an HttpClient timeout used to escape as an error instead of
+         // falling back to retrieval order.
          throw;
       }
       catch( Exception exception )
@@ -171,29 +236,89 @@ public class HuggingFaceReranker : IReranker
 
    /// <summary>
    /// POSTs the payload to /rerank, retrying the transient statuses a scale-to-zero endpoint returns while
-   /// its GPU spins up (503/429/409/5xx). Backs off (2s..10s) for up to ~5 minutes; a real error throws.
+   /// its GPU spins up (503/429/409/5xx) and any attempt that gets no response within the per-attempt
+   /// timeout. Backs off 2s..10s between attempts. A real error throws immediately.
+   /// <para>
+   /// The whole loop is bounded by <see cref="_totalBudget"/>, measured on a Stopwatch that runs across
+   /// in-flight requests and backoff sleeps alike. Each attempt's deadline is the per-attempt timeout or
+   /// whatever budget remains, whichever is sooner, and the loop stops rather than sleep past the budget.
+   /// Running out throws a TimeoutException carrying the last failure seen, which
+   /// <see cref="RerankAsync"/> reports and turns into the retrieval-order fallback.
+   /// </para>
    /// </summary>
    private async Task<string> PostWithWarmupRetryAsync( string payload, CancellationToken cancellationToken )
    {
       const int maxAttempts = 30;
-      for( int attempt = 1; ; attempt++ )
+      var elapsed = Stopwatch.StartNew();
+      var lastFailure = "no attempt was made";
+      var attempt = 0;
+      while( true )
+      {
+         var remaining = _totalBudget - elapsed.Elapsed;
+         if( remaining <= TimeSpan.Zero )
+            break;
+
+         attempt++;
+         var attemptTimeout = remaining < _attemptTimeout ? remaining : _attemptTimeout;
+         var outcome = await PostOnceAsync( payload, attemptTimeout, cancellationToken );
+         if( outcome.Body != null )
+            return outcome.Body;
+         if( !outcome.Transient )
+            throw new HttpRequestException( outcome.Failure );
+
+         lastFailure = outcome.Failure;
+         var backoff = TimeSpan.FromSeconds( Math.Min( 10, attempt * 2 ) );
+         if( attempt >= maxAttempts || elapsed.Elapsed + backoff >= _totalBudget )
+            break;
+
+         await Task.Delay( backoff, cancellationToken );
+      }
+
+      throw new TimeoutException(
+         $"gave up after {attempt} attempt(s) in {elapsed.Elapsed.TotalSeconds:F0}s " +
+         $"(budget {_totalBudget.TotalSeconds:F0}s); last failure: {lastFailure}" );
+   }
+
+   /// <summary>
+   /// Makes one POST to the rerank URL under its own deadline, linked to the caller's token so the
+   /// caller's cancellation still cuts it short.
+   /// <para>
+   /// Returns the body on success. Otherwise returns whether the failure is worth retrying, plus a
+   /// description of it. A hung request is classed as transient, the same as a 503: an endpoint stuck
+   /// waiting for hardware looks exactly like that from outside. When the caller's token is the one that
+   /// fired, the OperationCanceledException is not caught and propagates.
+   /// </para>
+   /// </summary>
+   /// <param name="payload">The serialized JSON request body.</param>
+   /// <param name="timeout">How long this attempt may wait for a response.</param>
+   /// <param name="cancellationToken">The caller's cancellation token.</param>
+   /// <returns>The response body (null on failure), whether a failure is transient, and its description.</returns>
+   private async Task<(string Body, bool Transient, string Failure)> PostOnceAsync(
+      string payload, TimeSpan timeout, CancellationToken cancellationToken )
+   {
+      using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource( cancellationToken );
+      attemptCancellation.CancelAfter( timeout );
+      try
       {
          using var content = new StringContent( payload, Encoding.UTF8, "application/json" );
-         using var response = await _httpClient.PostAsync( _rerankUrl, content, cancellationToken );
+         using var response = await _httpClient.PostAsync( _rerankUrl, content, attemptCancellation.Token );
          if( response.IsSuccessStatusCode )
-            return await response.Content.ReadAsStringAsync();
+            return ( await response.Content.ReadAsStringAsync(), false, null );
 
          var status = (int)response.StatusCode;
          var transient = status == 503 || status == 429 || status == 409 || status == 500 || status == 502 || status == 504;
-         if( !transient || attempt >= maxAttempts )
-            throw new HttpRequestException( await DescribeFailureAsync( response ) );
-
-         await Task.Delay( TimeSpan.FromSeconds( Math.Min( 10, attempt * 2 ) ), cancellationToken );
+         return ( null, transient, await DescribeFailureAsync( response ) );
+      }
+      catch( OperationCanceledException ) when( !cancellationToken.IsCancellationRequested )
+      {
+         return ( null, true, $"no response within {timeout.TotalSeconds:F0}s from {_rerankUrl}" );
       }
    }
 
    /// <summary>
-   /// Builds the failure message for a non-retryable response, including the start of the response body.
+   /// Builds the failure message for an unsuccessful response, including the start of the response body.
+   /// Transient failures get one too, so that when the budget runs out the report says what the endpoint
+   /// was actually returning (HF's "waiting for hardware" text, for example) rather than just "timed out".
    /// <para>
    /// The body is the whole point. EnsureSuccessStatusCode throws with the status code alone, and a bare
    /// "404 (Not Found)" cannot distinguish the two failures that produce it, which have opposite fixes:
