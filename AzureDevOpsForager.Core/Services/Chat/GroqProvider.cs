@@ -58,6 +58,31 @@ public class GroqProvider : ILLMProvider
          : "qwen/qwen3.8-27b";
 
    /// <summary>
+   /// Output-token ceiling sent with each request, overridable with the GROQ_MAX_TOKENS environment
+   /// variable.
+   /// <para>
+   /// This is a rate-limit setting as much as a length setting. Groq's on-demand tier enforces an
+   /// output-tokens-per-minute budget (1000 on this account) and rejects a request outright when the
+   /// <c>max_tokens</c> it asks for exceeds the budget REMAINING in the current window, not when the
+   /// answer actually gets that long. The previous 3000 therefore failed with
+   /// <c>rate_limit_exceeded</c> any time the preceding minute had seen traffic, while succeeding on
+   /// an idle window, which made it look intermittent rather than misconfigured.
+   /// </para>
+   /// <para>
+   /// 800 keeps a full-length answer inside the per-minute budget. Raising it trades the ability to
+   /// answer twice in a minute for longer single answers, so it belongs with the tier rather than in
+   /// the source.
+   /// </para>
+   /// </summary>
+   private static readonly int GroqMaxTokens =
+      int.TryParse( System.Environment.GetEnvironmentVariable( "GROQ_MAX_TOKENS" ),
+         System.Globalization.NumberStyles.Integer,
+         System.Globalization.CultureInfo.InvariantCulture, out var configuredMaxTokens )
+      && configuredMaxTokens > 0
+         ? configuredMaxTokens
+         : 800;
+
+   /// <summary>
    /// Absolute URL of Groq's OpenAI-compatible chat completions endpoint. Kept as a constant
    /// so the one network contract this class depends on lives in a single place.
    /// </summary>
@@ -184,7 +209,7 @@ public class GroqProvider : ILLMProvider
    /// <summary>
    /// Serialises the request body (model, messages, and sampling parameters) into the
    /// JSON HTTP content Groq expects. Temperature is kept low for deterministic, factual
-   /// code answers; max_tokens is set to 3000 as a balance point, richer than 2000 but low
+   /// code answers; the output ceiling is GroqMaxTokens, which is a rate-limit setting as much as a length one
    /// enough to avoid the rate limits a 6000-token ceiling tends to trip.
    /// </summary>
    private StringContent BuildRequestContent( List<object> messages )
@@ -194,7 +219,7 @@ public class GroqProvider : ILLMProvider
          model = GroqModel,
          messages = messages,
          temperature = 0.1,
-         max_tokens = 3000,
+         max_tokens = GroqMaxTokens,
          top_p = 0.9
       };
 
