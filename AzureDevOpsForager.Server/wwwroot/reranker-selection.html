@@ -64,6 +64,11 @@
   <main class="doc">
 
     <div class="card caveat" style="border-left:3px solid var(--amber)">
+      <p style="margin:0 0 .5rem"><strong>Correction, 2 October 2026.</strong> The October re-test
+      below first reported that <code>ettin-reranker-400m</code> ranks better than the deployed model,
+      nDCG@5 0.6564 against 0.5412. Those labelled figures came from six template queries. Re-scored
+      against 20 real questions labelled by hand, the gap halved to 0.6562 against 0.5942 and is
+      inside noise. The claim is withdrawn. The decision to keep the deployed model is unchanged.</p>
       <p style="margin:0 0 .5rem"><strong>Correction, September 2026.</strong> This page recorded
       <code>Qwen3-Reranker-4B</code> as the deployed reranker. It is not what runs. The live endpoint
       serves <code>Qwen3-Reranker-0.6B-seq-cls</code>, confirmed from the endpoint's own
@@ -525,8 +530,9 @@
     <p>The choice above was made on published benchmarks plus a latency judgement. In October 2026 it
       was re-tested on this corpus against three alternatives, with the retrieval, fusion weights,
       score floors and embedding model all held constant so that only the reranker varied. Twenty
-      questions came from this demo's own usage log, four were natural negative controls the corpus
-      cannot answer, and six were the labelled golden queries.</p>
+      questions came from this demo's own usage log and four were natural negative controls the corpus
+      cannot answer. The same twenty real questions were then labelled by hand at file level, 59
+      graded labels, to give nDCG, recall and MRR.</p>
 
     <div class="tbl-wrap">
       <table class="ev">
@@ -537,20 +543,24 @@
           <tr><td>Real questions, top-1</td><td class="num">0.6751</td><td class="num">0.9690</td><td class="num">0.9968</td><td class="num">0.9971</td></tr>
           <tr><td>Negative controls <span style="opacity:.7">(lower is better)</span></td><td class="num win">0.0593</td><td class="num lose">0.9607</td><td class="num lose">0.7897</td><td class="num lose">0.7906</td></tr>
           <tr><td><strong>Separation</strong></td><td class="num win">0.6158</td><td class="num lose">0.0083</td><td class="num">0.2071</td><td class="num">0.2065</td></tr>
-          <tr><td>Golden nDCG@5</td><td class="num">0.5412</td><td class="num">0.4849</td><td class="num win">0.6564</td><td class="num">0.6071</td></tr>
-          <tr><td>Golden recall@5</td><td class="num win">0.6667</td><td class="num">0.5000</td><td class="num win">0.6667</td><td class="num">0.5833</td></tr>
-          <tr><td>Golden MRR</td><td class="num">0.5417</td><td class="num">0.5833</td><td class="num win">0.6667</td><td class="num win">0.6667</td></tr>
+          <tr><td>Labelled nDCG@5</td><td class="num">0.5942</td><td class="num lose">0.3612</td><td class="num win">0.6562</td><td class="num">0.6051</td></tr>
+          <tr><td>Labelled recall@5</td><td class="num">0.5225</td><td class="num lose">0.3558</td><td class="num win">0.5742</td><td class="num">0.5283</td></tr>
+          <tr><td>Labelled MRR</td><td class="num">0.8167</td><td class="num lose">0.5000</td><td class="num win">0.8583</td><td class="num">0.7750</td></tr>
           <tr><td>Results surviving the score floors</td><td class="num win">7.7</td><td class="num lose">23.8</td><td class="num lose">25.0</td><td class="num lose">25.0</td></tr>
           <tr><td>Parameters</td><td class="num">0.6B</td><td class="num">0.49B</td><td class="num">0.39B</td><td class="num">0.15B</td></tr>
         </tbody>
       </table>
     </div>
 
-    <h3>The challengers rank better. They cannot decline</h3>
-    <p>This is not a case of the incumbent simply winning. On the labelled queries
-      <code>ettin-reranker-400m</code> is <strong>better</strong>: nDCG@5 0.6564 against 0.5412, MRR
-      0.6667 against 0.5417, and it ties on recall. At 0.39B parameters against 0.6B. On ranking
-      quality alone it would be the pick.</p>
+    <h3>On ranking, the best challenger is inside noise. None of them can decline</h3>
+    <p><code>ettin-reranker-400m</code> posts the highest labelled numbers: nDCG@5 0.6562 against
+      0.5942, MRR 0.8583 against 0.8167. That gap is not established. Paired question by question,
+      ettin wins 7, the deployed model wins 5, and 8 tie. The 95% bootstrap interval on the nDCG
+      difference runs from &minus;0.03 to +0.17, so it includes zero. <code>mxbai-rerank-base-v2</code>
+      is clearly last.</p>
+    <p>An earlier version of this section scored the same runs against six template queries, where
+      ettin read 0.6564 against 0.5412 and was reported as better. Real labels removed most of that
+      gap.</p>
     <p>The negative controls are where it falls apart. <code>ettin-reranker-150m</code> scores
       <em>"how many bits in a byte"</em> at <strong>0.79</strong> against a corpus of C# e-commerce
       code that contains no answer to it. <code>mxbai-rerank-base-v2</code> is worse still, with a
@@ -567,9 +577,9 @@
       instruction-conditioned binary judgement, which is what produces usable calibration. The ettin
       models are MS MARCO passage rerankers that take no instruction at all, and mxbai is a general
       multilingual reranker. None of them were built to represent absence.</p>
-    <p>That said, the honest reading is that a better-ranking model exists and the only thing
-      stopping its adoption is calibration. Re-deriving the score floors around a differently
-      calibrated model is a real option, and it has not been tried.</p>
+    <p>This page previously said a better-ranking model exists and only calibration stopped its
+      adoption. The labelled set does not show that. Re-deriving the score floors around ettin is
+      only worth trying if a larger labelled set shows a real ranking gain.</p>
 
     <div class="card flag">
       <p style="margin:0 0 .5rem"><strong>Two of the three challengers nearly produced fabricated
@@ -592,8 +602,9 @@
       free, which is exactly what happened. The same inflation applies to the negative controls, so
       separation stays honest where the raw score does not, and the labelled queries are independent
       of all of it. The conclusion rests on those two and not on the relevance row.</p>
-    <p>Twenty real questions, four negative controls and six labelled queries is a small set. The
-      direction here is not subtle, but it is one afternoon of measurement.</p>
+    <p>Twenty labelled questions and four negative controls is a small set. Differences under about
+      0.1 nDCG are inside noise at this size. The separation result is not subtle. The ranking result
+      between the top three is.</p>
     <p class="mono" style="opacity:.7;font-size:.85rem">An earlier version of this section carried
       figures measured against an index built with a tokenization bug. They have been replaced with
       figures from the corrected index.</p>
@@ -602,9 +613,9 @@
 
     <div class="card caveat">
       <ul style="margin:0">
-        <li><strong>There is no nDCG or recall@k measured on this corpus.</strong> The benchmark figures are
+        <li><strong>The benchmark figures are not measured on this corpus.</strong> They are
             published results on public datasets; the 4,600&times; result is a score-separation test on a
-            hand-built three-document probe.</li>
+            hand-built three-document probe. Corpus-level nDCG is in the October re-test above.</li>
         <li><strong>The six rerankers were never run head-to-head on the same query.</strong> That table is
             published benchmarks, not a bake-off on this corpus. The live measurement above tested one model
             against itself in two prompt formats — it says nothing about how the other five would have
@@ -628,8 +639,8 @@
 
     <p>
       The model selection is defensible on independent benchmarks plus a decisive live prompt-format
-      measurement. The end-to-end retrieval-quality number is the one thing still missing, and it is gated on
-      labelling that golden set. Stating that plainly is more useful than a chart that implies otherwise.
+      measurement. A hand-labelled set of 20 real questions now exists and is reported above. It is
+      enough to identify the clear loser and too small to split the close calls.
     </p>
 
     <p class="backlink"><a href="/">&larr; Try the search this all feeds</a></p>

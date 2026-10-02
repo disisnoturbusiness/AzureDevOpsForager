@@ -63,6 +63,14 @@
 
   <main class="doc">
 
+    <div class="card caveat" style="border-left:3px solid var(--amber)">
+      <p style="margin:0"><strong>Re-scored, 2 October 2026.</strong> The labelled rows below were
+        first measured on six template queries, where bge-code-v1 led on nDCG and MRR. Re-scored
+        against 20 real questions labelled by hand, Qwen3-Embedding-0.6B leads on both, and the gap
+        is outside noise. Ranking is no longer evidence against the switch. The negative-control
+        regression stands.</p>
+    </div>
+
     <div class="card caveat">
       <p style="margin:0 0 .5rem"><strong>Correction, 2 October 2026.</strong> The conclusion first
         published here, that Qwen3-Embedding-0.6B beat the shipping model on every metric, was
@@ -138,8 +146,8 @@
     <h3>The questions</h3>
     <p>Twenty questions taken from this demo's own usage log, which is to say questions real people
       actually typed, not questions written to be answered. Four natural negative controls came with
-      them, queries the corpus cannot answer at all. Six labelled queries with graded relevance
-      provide nDCG, recall and MRR.</p>
+      them, queries the corpus cannot answer at all. The same twenty real questions, labelled by hand
+      at file level with graded relevance (59 labels), provide nDCG, recall and MRR.</p>
     <p>For the unlabelled questions the cross-encoder reranker scores the results. It is independent
       of the embedding model, which is what makes it usable as a judge, but it is still a model's
       opinion rather than ground truth.</p>
@@ -158,9 +166,9 @@
           <tr><td>Real questions, top-1</td><td class="num">0.5083</td><td class="num win">0.6751</td></tr>
           <tr><td>Real questions, mean top-5</td><td class="num">0.3314</td><td class="num win">0.4284</td></tr>
           <tr><td><strong>Separation</strong> <span style="opacity:.7">(real minus negative)</span></td><td class="num">0.5012</td><td class="num win">0.6158</td></tr>
-          <tr><td>Golden recall@5</td><td class="num">0.5833</td><td class="num win">0.6667</td></tr>
-          <tr><td>Golden nDCG@5</td><td class="num win">0.5587</td><td class="num">0.5412</td></tr>
-          <tr><td>Golden MRR</td><td class="num win">0.5833</td><td class="num">0.5417</td></tr>
+          <tr><td>Labelled recall@5</td><td class="num">0.3600</td><td class="num win">0.5225</td></tr>
+          <tr><td>Labelled nDCG@5</td><td class="num">0.4309</td><td class="num win">0.5942</td></tr>
+          <tr><td>Labelled MRR</td><td class="num">0.6000</td><td class="num win">0.8167</td></tr>
           <tr><td>Negative controls <span style="opacity:.7">(lower is better)</span></td><td class="num win">0.0072</td><td class="num lose">0.0593</td></tr>
           <tr><td>Embedding throughput</td><td class="num">16.8/s</td><td class="num win">25.2/s</td></tr>
           <tr><td>Resident VRAM</td><td class="num">3.1 GB</td><td class="num win">1.2 GB</td></tr>
@@ -182,17 +190,21 @@
 
     <h2>What was decided</h2>
 
-    <p><strong>The embedder was switched to Qwen3-Embedding-0.6B</strong>, and the decision went
-      against part of the evidence above. That is worth stating plainly rather than presenting the
+    <p><strong>The embedder was switched to Qwen3-Embedding-0.6B</strong>. It went against one
+      metric, the negative controls, and that is worth stating plainly rather than presenting the
       measurement as unanimous.</p>
 
-    <p>What it buys: better top-1, better mean top-5, better separation and better recall@5, at 0.6B
+    <p>What it buys: better top-1, better mean top-5, better separation, and better recall, nDCG and
+      MRR on the labelled set, at 0.6B
       parameters against 1.54B, 1024 dimensions against 1536, and 25.2 chunks per second against
       16.8. Cheaper to run, cheaper to store, and it finds more of the answers.</p>
 
-    <p>What it costs: the labelled ranking metrics go the other way, nDCG@5 0.5412 against 0.5587 and
-      MRR 0.5417 against 0.5833, and the negative-control score is roughly eight times worse. It is
-      more willing to score an unanswerable question as relevant.</p>
+    <p>What it costs: the negative-control score is roughly eight times worse. It is more willing to
+      score an unanswerable question as relevant.</p>
+    <p>On the labelled set the ranking gap is real at this sample size. nDCG@5 0.5942 against 0.4309:
+      paired question by question, Qwen3 wins 7, bge wins 2, and 11 tie, with a 95% bootstrap interval
+      of +0.05 to +0.29. MRR 0.8167 against 0.6000, interval +0.05 to +0.40. An earlier version of
+      this page, scored on six template queries, had bge ahead on both, 0.5587 against 0.5412.</p>
 
     <p>The reasoning for taking that trade: recall and separation are what a user notices, and the
       calibration gap is addressable from the other end. The score floors were derived against the
@@ -212,17 +224,16 @@
         the network dominated so completely that inference time was invisible. The throughput and
         VRAM figures above were measured on the machine and are real; any per-query latency
         comparison from that run is not.</p>
-      <p style="margin:0 0 .6rem"><strong>The question set is small.</strong> Twenty real questions
-        and six labelled queries. The six are templates, not a hand-labelled set. The direction is
-        consistent across seven independent metrics, which is worth more than any single number, but
-        this is one afternoon of measurement.</p>
+      <p style="margin:0 0 .6rem"><strong>The question set is small.</strong> Twenty real questions,
+        labelled by hand, plus four negative controls. Large gaps show up at that size and small ones
+        do not.</p>
       <p style="margin:0"><strong>The judge is a model.</strong> For the unlabelled questions the
         reranker decides what is good. It is independent of the embedder, so it cannot simply
         flatter whichever model produced the candidates, but it is not a human label.</p>
     </div>
 
-    <p>What would settle it is a properly hand-labelled golden set on this corpus. That work is
-      outstanding and is named as outstanding rather than quietly skipped.</p>
+    <p>The hand-labelled set this page used to name as outstanding now exists, and the labelled rows
+      above come from it. A larger one would tighten every interval here.</p>
 
     <a class="backlink" href="/reranker-selection.html">How the reranker was chosen &rarr;</a><br />
     <a class="backlink" href="/">&larr; Back to search</a>
