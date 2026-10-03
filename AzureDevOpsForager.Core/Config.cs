@@ -254,8 +254,10 @@ public static class Config
 
    /// <summary>
    /// Relevance gate, part one: a result is returned only if its cross-encoder score is at least this
-   /// FRACTION of the best score in the same result set. Default 0.1, i.e. keep anything within one
-   /// order of magnitude of the top hit.
+   /// FRACTION of the best score in the same result set. Default 0.2, i.e. keep anything scoring at least
+   /// a fifth of the top hit. Re-measured 2026-10-02 on Qwen3-Embedding-0.6B with Qwen3-Reranker-0.6B over
+   /// 40 answerable and 38 unanswerable questions: 0.2 trims junk without dropping a single relevant file,
+   /// while 0.3 starts dropping files a developer needs. The previous default was 0.1.
    /// <para>
    /// This is deliberately RELATIVE rather than an absolute score floor. An absolute floor is a property
    /// of one specific model's score distribution, so it silently stops working the moment the reranker
@@ -269,7 +271,7 @@ public static class Config
    /// Set to 0 to disable and always return the full reranked list.
    /// </para>
    /// </summary>
-   public static double MinRerankScoreRatio { get; set; } = ReadEnvDouble( "MINRERANK_SCORE_RATIO", 0.1 );
+   public static double MinRerankScoreRatio { get; set; } = ReadEnvDouble( "MINRERANK_SCORE_RATIO", 0.2 );
 
    /// <summary>
    /// Relevance gate, part two: if the BEST score in a result set is below this, the whole set is
@@ -277,22 +279,37 @@ public static class Config
    /// <para>
    /// The ratio alone cannot answer "does this corpus contain any answer at all?" — when every candidate
    /// scores ~0, the top is also ~0 and everything sits within any ratio of it, so a pure ratio would
-   /// return a full page of noise for an unanswerable question. This guard is the one genuinely absolute
-   /// judgement, and it is kept deliberately tiny so it stays model-independent: any sigmoid-style
-   /// cross-encoder emitting a top score below 1e-6 is saying "nothing here matches", whatever its
-   /// calibration. It should never be raised to a value that tries to express relevance — that is the
-   /// ratio's job, and conflating the two is what made the absolute floor fragile.
+   /// return a full page of noise for an unanswerable question.
+   /// </para>
+   /// <para>
+   /// This used to be 1e-6, meant only to catch an all-zero result set, and measurement showed that was
+   /// not enough. Questions the corpus cannot answer but that sound as if it could ("how are refunds
+   /// issued", "where is sales tax calculated") pick up full-text matches on words like order and
+   /// customer, so <see cref="MinVectorOnlyRerankScore"/> never applies to them. With a 1e-6 guard, 28 of
+   /// 38 verified-unanswerable questions returned a page of results. Measured 2026-10-02 against 40
+   /// answerable questions on Qwen3-Reranker-0.6B, the quietest genuinely answerable query topped out
+   /// at 0.173. A 0.05 floor declines 17 of the 28 with no answerable question lost, and sits 3.5x
+   /// below that quietest real answer.
+   /// </para>
+   /// <para>
+   /// That makes this an absolute, reranker-specific floor, which is the trap
+   /// <see cref="MinRerankScoreRatio"/> exists to avoid: a floor calibrated against Qwen3-Reranker-4B
+   /// once emptied every search when the endpoint moved to the 0.6B. It is acceptable only while the
+   /// reranker is pinned. ON ANY RERANKER CHANGE, RE-MEASURE IT, and set MINRERANK_TOP_SCORE=0.000001 in
+   /// the meantime to fall back to catching only an all-zero result set. The server logs the observed
+   /// top score whenever a whole result set is filtered, which is the tell.
    /// </para>
    /// <para>
    /// This guard is only safe because a FAILING reranker no longer reports zeros. HuggingFaceReranker's
    /// fail-soft path used to emit 0.0 for every candidate, which is indistinguishable from the reranker
    /// having judged everything irrelevant — so an endpoint outage was read as "no answer exists" and
    /// emptied EVERY search rather than degrading to retrieval order. Both reranker implementations now
-   /// fall back to high descending pseudo-scores, which leaves this guard inert during an outage. If that
+   /// fall back to high descending pseudo-scores (1.0, 0.999, ...), far above this floor, which leaves
+   /// this guard inert during an outage. If that
    /// ever regresses, this one setting becomes a single point of failure for all search.
    /// </para>
    /// </summary>
-   public static double MinRerankTopScore { get; set; } = ReadEnvDouble( "MINRERANK_TOP_SCORE", 0.000001 );
+   public static double MinRerankTopScore { get; set; } = ReadEnvDouble( "MINRERANK_TOP_SCORE", 0.05 );
 
    /// <summary>
    /// Minimum rerank score a result needs when it has NO lexical support — that is, when neither the
@@ -322,6 +339,12 @@ public static class Config
    /// while the weakest hit of any genuinely-answered query scored 0.279 and most scored above 0.9. That
    /// is a 31x gap with nothing inside it; 0.05 is its geometric midpoint, so the floor sits 5.6x above
    /// the loudest false positive and 5.6x below the quietest true one.
+   /// </para>
+   /// <para>
+   /// Re-checked 2026-10-02 after the switch to Qwen3-Embedding-0.6B: 0.05 still holds. Raising it buys
+   /// almost nothing (0.15 saves one result across 38 unanswerable questions), and 0.2 starts losing real
+   /// answers, because some correct hits are vector-only and score modestly ("what tells us the
+   /// storefront is still reachable" finds HomePageHealthCheck at 0.173 with no full-text support).
    /// </para>
    /// <para>
    /// This is still an absolute number, which is the trap <see cref="MinRerankScoreRatio"/> exists to
@@ -725,10 +748,10 @@ public static class Config
          else
          {
             MinRerankTopScore = minTopScore;
-            // This guard exists only to catch an all-zero result set. Raised into the range where real
-            // models score real hits, it becomes the model-specific absolute floor this design replaced.
-            if( minTopScore > 0.001 )
-               Logger.Warn( $"MinRerankTopScore is {minTopScore}, which is high enough to be acting as an absolute relevance floor. That is model-specific and breaks on a reranker swap — use MinRerankScoreRatio for relevance instead.", "Config" );
+            // Measured on Qwen3-Reranker-0.6B, the quietest genuinely answerable question tops out at
+            // 0.173. Above 0.15 this guard starts discarding real answers rather than unanswerable noise.
+            if( minTopScore > 0.15 )
+               Logger.Warn( $"MinRerankTopScore is {minTopScore}, above 0.15, where measured answerable questions start being discarded (quietest real answer 0.173 on Qwen3-Reranker-0.6B). Re-measure before raising it, and on any reranker change.", "Config" );
          }
       }
    }

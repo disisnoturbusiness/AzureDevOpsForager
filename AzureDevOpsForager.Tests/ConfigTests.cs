@@ -162,14 +162,13 @@ public class ConfigTests
    public void Defaults_AreTheMeasuredValues()
    {
       // Guards the constants this project has already got wrong twice in one day. MaxVectorDistance must
-      // sit clear of the measured 0.67-0.90 distance band. The rerank gate must stay RELATIVE: a ratio in
-      // a sane range, and a degenerate-top guard small enough that it only ever catches an all-zero result
-      // set. If MinRerankTopScore ever drifts up into the range where models score real hits, it has
-      // become the model-specific absolute floor that broke every search on a reranker swap.
+      // sit clear of the measured 0.67-0.90 distance band. The rerank ratio must stay in a sane range. The
+      // top-score floor is a measured absolute value for Qwen3-Reranker-0.6B (0.05, 2026-10-02); above
+      // 0.15 it starts discarding genuinely answerable questions, the quietest of which tops out at 0.173.
       var freshMax = LoadMaxVectorDistance( "not-a-number", startingValue: Config.MaxVectorDistance );
       Assert.True( freshMax >= 0.95, $"MaxVectorDistance default {freshMax} is inside the measured distance band" );
 
       Assert.InRange( Config.MinRerankScoreRatio, 0.01, 0.5 );
-      Assert.InRange( Config.MinRerankTopScore, 0.0, 0.001 );
+      Assert.InRange( Config.MinRerankTopScore, 0.0, 0.15 );
    }
 }

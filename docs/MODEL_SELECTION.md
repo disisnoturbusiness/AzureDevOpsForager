@@ -185,10 +185,12 @@ make each one *visible*, not merely to avoid it once.
    threshold are all expressed in units the model defines. On any model change, grep the config surface
    and ask of each constant: *is this a number this model gets a vote on?* If yes, it needs
    re-measuring. Better, express the judgement so it cannot go stale: `MinRerankScoreRatio` is "at least
-   10% of the best score in this result set", which carries across models because it depends only on the
-   shape of one result set, not on absolute values. The one deliberately absolute threshold
-   (`MinVectorOnlyRerankScore`) is scoped to a subset precisely so that mis-setting it costs those
-   results rather than emptying every search.
+   20% of the best score in this result set", which carries across models because it depends only on the
+   shape of one result set, not on absolute values. Two thresholds are deliberately absolute and are
+   reranker-specific. `MinVectorOnlyRerankScore` is scoped to a subset, so mis-setting it costs only
+   those results. `MinRerankTopScore` has been 0.05 since October 2026, after measurement showed a
+   degenerate-only 1e-6 guard let 28 of 38 unanswerable questions return results. Both must be
+   re-measured on any reranker change.
 2. **A fail-soft path must not emit values inside the real range.** The hosted reranker's fallback
    originally returned `0.0` for every candidate — indistinguishable from the model judging everything
    irrelevant, so an endpoint outage read as "this corpus has no answer" and emptied every search

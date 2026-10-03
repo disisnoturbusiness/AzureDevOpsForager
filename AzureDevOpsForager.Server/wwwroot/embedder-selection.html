@@ -68,7 +68,7 @@
         first measured on six template queries, where bge-code-v1 led on nDCG and MRR. Re-scored
         against 20 real questions labelled by hand, Qwen3-Embedding-0.6B leads on both, and the gap
         is outside noise. Ranking is no longer evidence against the switch. The negative-control
-        regression stands.</p>
+        figure turned out to overstate the cost as well; see <em>What it costs</em> below.</p>
     </div>
 
     <div class="card caveat">
@@ -169,7 +169,7 @@
           <tr><td>Labelled recall@5</td><td class="num">0.3600</td><td class="num win">0.5225</td></tr>
           <tr><td>Labelled nDCG@5</td><td class="num">0.4309</td><td class="num win">0.5942</td></tr>
           <tr><td>Labelled MRR</td><td class="num">0.6000</td><td class="num win">0.8167</td></tr>
-          <tr><td>Negative controls <span style="opacity:.7">(lower is better)</span></td><td class="num win">0.0072</td><td class="num lose">0.0593</td></tr>
+          <tr><td>Negative controls <span style="opacity:.7">(4 queries, lower is better)</span></td><td class="num win">0.0072</td><td class="num lose">0.0593</td></tr>
           <tr><td>Embedding throughput</td><td class="num">16.8/s</td><td class="num win">25.2/s</td></tr>
           <tr><td>Resident VRAM</td><td class="num">3.1 GB</td><td class="num win">1.2 GB</td></tr>
           <tr><td>Dimensions</td><td class="num">1536</td><td class="num win">1024</td></tr>
@@ -179,38 +179,42 @@
 
     <div class="bigstat">
       <div><b>0.50 &rarr; 0.62</b><span>separation, the one metric that combines finding answers and rejecting junk</span></div>
-      <div><b>8&times;</b><span>worse at rejecting unanswerable questions</span></div>
+      <div><b>33 / 40</b><span>answers reach the top five, against 23 for bge-code-v1</span></div>
       <div><b>2.5&times;</b><span>fewer parameters, a third narrower per vector</span></div>
     </div>
 
     <p>The third candidate, <code>jina-code-embeddings-1.5b</code>, is competitive on relevance but
-      scores 0.0596 on the negative controls, effectively tied with Qwen3 and about eight times
-      worse than the shipping model. It is CC-BY-NC in any case, so it was only ever a measurement
+      scores 0.0596 on the four negative controls, effectively tied with Qwen3 and well above the
+      shipping model's 0.0072 on that small set. It is CC-BY-NC in any case, so it was only ever a measurement
       reference.</p>
 
     <h2>What was decided</h2>
 
     <p><strong>The embedder was switched to Qwen3-Embedding-0.6B</strong>. It went against one
       metric, the negative controls, and that is worth stating plainly rather than presenting the
-      measurement as unanimous.</p>
+      measurement as unanimous, even though that metric turned out to overstate the cost.</p>
 
     <p>What it buys: better top-1, better mean top-5, better separation, and better recall, nDCG and
       MRR on the labelled set, at 0.6B
       parameters against 1.54B, 1024 dimensions against 1536, and 25.2 chunks per second against
       16.8. Cheaper to run, cheaper to store, and it finds more of the answers.</p>
 
-    <p>What it costs: the negative-control score is roughly eight times worse. It is more willing to
-      score an unanswerable question as relevant.</p>
+    <p>What it costs: on the four negative controls the mean top score is roughly eight times worse,
+      0.0593 against 0.0072. That overstates it. Almost all of the rise is one question: "parity check"
+      now matches an <code>Equals</code> implementation at 0.23, which is arguably a fair hit.
+      Re-measured on 38 verified-unanswerable questions through the production relevance gate, both
+      models let the same 28 through under the score floors then in place. Under the floors re-derived
+      since, bge-code-v1 would let 7 through and Qwen3 lets 11. That is a small real cost, not eight
+      times.</p>
     <p>On the labelled set the ranking gap is real at this sample size. nDCG@5 0.5942 against 0.4309:
       paired question by question, Qwen3 wins 7, bge wins 2, and 11 tie, with a 95% bootstrap interval
       of +0.05 to +0.29. MRR 0.8167 against 0.6000, interval +0.05 to +0.40. An earlier version of
       this page, scored on six template queries, had bge ahead on both, 0.5587 against 0.5412.</p>
 
-    <p>The reasoning for taking that trade: recall and separation are what a user notices, and the
-      calibration gap is addressable from the other end. The score floors were derived against the
-      old model's distribution, and they have not yet been re-derived against this one. Until they
-      are, this change is a known regression in the system's willingness to decline, and that is
-      being tracked rather than ignored.</p>
+    <p>The reasoning for taking that trade: recall and ranking are what a user notices. The score
+      floors have since been re-derived on this model, on 40 answerable and 38 unanswerable questions.
+      Unanswerable questions that return results fell from 28 of 38 to 11, and no answerable question
+      lost its answer.</p>
 
     <p>This page previously recommended keeping the old model. That recommendation was based on the
       same numbers, read more conservatively.</p>
