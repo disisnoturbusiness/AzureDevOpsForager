@@ -287,9 +287,11 @@ public static class Config
    /// issued", "where is sales tax calculated") pick up full-text matches on words like order and
    /// customer, so <see cref="MinVectorOnlyRerankScore"/> never applies to them. With a 1e-6 guard, 28 of
    /// 38 verified-unanswerable questions returned a page of results. Measured 2026-10-02 against 40
-   /// answerable questions on Qwen3-Reranker-0.6B, the quietest genuinely answerable query topped out
-   /// at 0.173. A 0.05 floor declines 17 of the 28 with no answerable question lost, and sits 3.5x
-   /// below that quietest real answer.
+   /// answerable questions on Qwen3-Reranker-0.6B: of the 33 whose answer reaches the top 5, the quietest
+   /// topped out at 0.173. A 0.05 floor declines 17 of the 28 and sits 3.5x below that quietest real
+   /// answer. It also declines one answerable question, "how is a bearer credential produced after sign
+   /// in" (top score 0.019), whose results held no relevant file, so no answer is lost. Two more answerable
+   /// questions sit just above the floor (0.064, 0.081), also without a relevant file in their results.
    /// </para>
    /// <para>
    /// That makes this an absolute, reranker-specific floor, which is the trap
