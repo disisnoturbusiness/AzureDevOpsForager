@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -16,26 +18,88 @@ namespace AzureDevOpsForager.Core.Services.Embedding;
 /// <see cref="Config.EmbeddingQueryInstruction"/>) while documents/passages are embedded raw. Results are
 /// L2-normalized so cosine ranking stays valid. This is what lets the Server and Indexer run with zero
 /// local ONNX.
+///
+/// Query embeds run under a time budget (<see cref="DefaultQueryBudget"/>); passage embeds do not. A
+/// query embed sits on a visitor's search request, which the hosting front end abandons at about 230
+/// seconds, and the search already falls back to full-text-only when the embed throws. A passage embed
+/// sits in the indexer, where waiting out a long cold start is the whole point of the warm-up retry.
 /// </summary>
 public class HuggingFaceEmbedder : IEmbedder, IDisposable
 {
    #region Data Members
 
-   /// <summary>Shared client pre-loaded with the bearer Authorization header and a generous timeout.</summary>
+   /// <summary>
+   /// The most wall-clock time one QUERY embed may spend on the endpoint, counting every attempt, the time
+   /// each request is in flight, and every backoff sleep between them.
+   /// <para>
+   /// The query embed is the first thing a visitor's search waits on, and Azure App Service abandons the
+   /// request at roughly 230 seconds with a 504. The unbounded warm-up loop (30 attempts, 3-minute timeout
+   /// each) could outlive that on its own, which is the same failure that took search down on 2026-10-02
+   /// through the reranker. When this budget runs out the embed throws, and HybridSearchService serves a
+   /// full-text-only result instead.
+   /// </para>
+   /// <para>
+   /// 90 seconds is about three times the 30.9 s embedder cold start recorded in HybridSearchService (an
+   /// earlier embedder; the current model's cold start has not been measured separately), so an ordinary
+   /// wake should still complete inside it, and it leaves the rest of the search deadline for SQL and the
+   /// rerank.
+   /// The request that hits the budget has already triggered the wake, so the next search gets vectors.
+   /// </para>
+   /// </summary>
+   private static readonly TimeSpan DefaultQueryBudget = TimeSpan.FromSeconds( 90 );
+
+   /// <summary>
+   /// The longest a single query-embed attempt may wait for a response before it is abandoned and counted
+   /// as a transient failure. Never longer than what remains of <see cref="DefaultQueryBudget"/>.
+   /// </summary>
+   private static readonly TimeSpan DefaultQueryAttemptTimeout = TimeSpan.FromSeconds( 30 );
+
+   /// <summary>
+   /// Shared client pre-loaded with the bearer Authorization header and a generous timeout. The 3-minute
+   /// timeout is what bounds a single passage-embed attempt; query attempts carry a shorter deadline of
+   /// their own through a CancellationTokenSource, which fires first.
+   /// </summary>
    private readonly HttpClient _httpClient;
 
    /// <summary>The HF endpoint URL that returns an embedding for a single "inputs" string.</summary>
    private readonly string _endpointUrl;
 
+   /// <summary>Total time budget for one query embed; see <see cref="DefaultQueryBudget"/>.</summary>
+   private readonly TimeSpan _queryBudget;
+
+   /// <summary>Per-attempt response deadline for a query embed; see <see cref="DefaultQueryAttemptTimeout"/>.</summary>
+   private readonly TimeSpan _queryAttemptTimeout;
+
    #endregion
 
    #region Constructor
 
-   /// <summary>Creates an embedder bound to a HF endpoint URL and bearer token.</summary>
+   /// <summary>
+   /// Creates an embedder bound to a HF endpoint URL and bearer token, using the production query limits
+   /// <see cref="DefaultQueryBudget"/> and <see cref="DefaultQueryAttemptTimeout"/>.
+   /// </summary>
    public HuggingFaceEmbedder( string endpointUrl, string token )
+      : this( endpointUrl, token, new HttpClientHandler(), DefaultQueryBudget, DefaultQueryAttemptTimeout )
+   {
+   }
+
+   /// <summary>
+   /// Creates an embedder over a caller-supplied message handler and explicit query time limits. This is
+   /// the seam the unit tests use to stand in a fake endpoint (one that returns 503 forever, or never
+   /// answers at all) and to prove the budget in seconds rather than minutes. The client takes ownership
+   /// of the handler and disposes it with itself.
+   /// </summary>
+   /// <param name="endpointUrl">The endpoint URL that returns an embedding for one "inputs" string.</param>
+   /// <param name="token">The bearer token, or null/blank to send no Authorization header.</param>
+   /// <param name="handler">The HTTP message handler every request is sent through.</param>
+   /// <param name="queryBudget">The most wall-clock time one query embed may spend across all attempts.</param>
+   /// <param name="queryAttemptTimeout">The longest one query-embed attempt may wait for a response.</param>
+   public HuggingFaceEmbedder( string endpointUrl, string token, HttpMessageHandler handler, TimeSpan queryBudget, TimeSpan queryAttemptTimeout )
    {
       _endpointUrl = endpointUrl?.TrimEnd( '/' );
-      _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes( 3 ) };
+      _queryBudget = queryBudget;
+      _queryAttemptTimeout = queryAttemptTimeout;
+      _httpClient = new HttpClient( handler ) { Timeout = TimeSpan.FromMinutes( 3 ) };
       if( !string.IsNullOrWhiteSpace( token ) )
          _httpClient.DefaultRequestHeaders.Add( "Authorization", "Bearer " + token );
    }
@@ -88,14 +152,20 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
 
    #region Async (IEmbedder + Indexer's async embed loop)
 
-   /// <summary>Async passage embed for the Indexer's parallel loop (documents are embedded raw, per the model card).</summary>
-   public Task<float[]> EmbedPassageAsync( string text ) => EmbedAsync( text );
+   /// <summary>
+   /// Async passage embed for the Indexer's parallel loop (documents are embedded raw, per the model card).
+   /// No time budget: the indexer would rather wait out a cold start than skip chunks.
+   /// </summary>
+   public Task<float[]> EmbedPassageAsync( string text ) => EmbedAsync( text, null );
 
-   /// <summary>Async query embed (wraps the text in the bge-code-v1 "&lt;instruct&gt;/&lt;query&gt;" prompt).</summary>
+   /// <summary>
+   /// Async query embed (wraps the text in the bge-code-v1 "&lt;instruct&gt;/&lt;query&gt;" prompt). Bounded
+   /// by the query time budget; running out throws a TimeoutException naming the last failure.
+   /// </summary>
    public Task<float[]> EmbedQueryAsync( string text ) =>
       string.IsNullOrWhiteSpace( text )
          ? Task.FromResult( new float[Config.EmbeddingDimension] )
-         : EmbedAsync( $"<instruct>{Config.EmbeddingQueryInstruction}\n<query>{text}" );
+         : EmbedAsync( $"<instruct>{Config.EmbeddingQueryInstruction}\n<query>{text}", _queryBudget );
 
    /// <summary>
    /// Async form of <see cref="EmbedQueryBatch"/>: awaits each query embed in turn so a request thread
@@ -138,8 +208,12 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
 
    #region Private Methods
 
-   /// <summary>POSTs {"inputs": text} to the endpoint (with warm-up retry), parses the vector, and L2-normalizes it.</summary>
-   private async Task<float[]> EmbedAsync( string text )
+   /// <summary>
+   /// POSTs {"inputs": text} to the endpoint (with warm-up retry), parses the vector, and L2-normalizes it.
+   /// </summary>
+   /// <param name="text">The text to embed, already wrapped in the query prompt when it is a query.</param>
+   /// <param name="budget">The total time budget for the warm-up retry, or null for none (passages).</param>
+   private async Task<float[]> EmbedAsync( string text, TimeSpan? budget )
    {
       if( string.IsNullOrWhiteSpace( text ) )
          return new float[Config.EmbeddingDimension];
@@ -147,7 +221,7 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
       // truncate:true lets TEI clip inputs beyond the model's context window instead of erroring; with
       // bge-code-v1's 32k window a Roslyn chunk should never actually hit it, so this is a safety net.
       var payload = JsonConvert.SerializeObject( new { inputs = text, truncate = true } );
-      var body = await PostWithWarmupRetryAsync( payload );
+      var body = await PostWithWarmupRetryAsync( payload, budget );
 
       var vector = ParseVector( body );
       NormalizeInPlace( vector );
@@ -156,25 +230,88 @@ public class HuggingFaceEmbedder : IEmbedder, IDisposable
 
    /// <summary>
    /// POSTs the payload, retrying the transient statuses a scale-to-zero HF endpoint returns while its GPU
-   /// spins up (503 loading, 429 rate, 409 conflict, other 5xx). Backs off (2s..10s) for up to ~5 minutes so
-   /// a cold endpoint warms rather than failing every chunk; a real error (e.g. 401/400) throws immediately.
+   /// spins up (503 loading, 429 rate, 409 conflict, other 5xx). Backs off (2s..10s) for up to 30 attempts
+   /// (~5 minutes) so a cold endpoint warms rather than failing every chunk; a real error (e.g. 401/400)
+   /// throws an HttpRequestException immediately, as does running out of attempts.
+   /// <para>
+   /// With a budget (the query path) the loop is also bounded in wall-clock time, measured on a Stopwatch
+   /// that runs across in-flight requests and backoff sleeps alike. Each attempt's deadline is the
+   /// per-attempt timeout or whatever budget remains, whichever is sooner; an attempt that gets no
+   /// response in time is retried like a 503; and the loop stops rather than sleep past the budget.
+   /// Running out throws a TimeoutException carrying the last failure seen.
+   /// </para>
    /// </summary>
-   private async Task<string> PostWithWarmupRetryAsync( string payload )
+   /// <param name="payload">The serialized JSON request body.</param>
+   /// <param name="budget">The total time budget, or null for the unbounded passage path.</param>
+   /// <returns>The successful response body.</returns>
+   private async Task<string> PostWithWarmupRetryAsync( string payload, TimeSpan? budget )
    {
       const int maxAttempts = 30;
-      for( int attempt = 1; ; attempt++ )
+      var elapsed = Stopwatch.StartNew();
+      var lastFailure = "no attempt was made";
+      var attempt = 0;
+      while( true )
+      {
+         var attemptTimeout = Timeout.InfiniteTimeSpan;
+         if( budget.HasValue )
+         {
+            var remaining = budget.Value - elapsed.Elapsed;
+            if( remaining <= TimeSpan.Zero )
+               break;
+            attemptTimeout = remaining < _queryAttemptTimeout ? remaining : _queryAttemptTimeout;
+         }
+
+         attempt++;
+         var outcome = await PostOnceAsync( payload, attemptTimeout );
+         if( outcome.Body != null )
+            return outcome.Body;
+         if( !outcome.Transient || attempt >= maxAttempts )
+            throw new HttpRequestException( outcome.Failure );
+
+         lastFailure = outcome.Failure;
+         var backoff = TimeSpan.FromSeconds( Math.Min( 10, attempt * 2 ) );
+         if( budget.HasValue && elapsed.Elapsed + backoff >= budget.Value )
+            break;
+
+         await Task.Delay( backoff );
+      }
+
+      throw new TimeoutException(
+         $"Query embed gave up after {attempt} attempt(s) in {elapsed.Elapsed.TotalSeconds:F0}s " +
+         $"(budget {budget.GetValueOrDefault().TotalSeconds:F0}s); last failure: {lastFailure}" );
+   }
+
+   /// <summary>
+   /// Makes one POST to the endpoint under its own deadline. Returns the body on success; otherwise
+   /// whether the failure is worth retrying, plus a description of it.
+   /// <para>
+   /// Only this attempt's own deadline is caught, and a hung request is classed as transient, the same as
+   /// a 503: an endpoint stuck waiting for hardware looks exactly like that from outside. With an infinite
+   /// deadline (the passage path) the HttpClient's 3-minute timeout still applies and propagates as it
+   /// always has.
+   /// </para>
+   /// </summary>
+   /// <param name="payload">The serialized JSON request body.</param>
+   /// <param name="timeout">How long this attempt may wait for a response, or infinite.</param>
+   /// <returns>The response body (null on failure), whether a failure is transient, and its description.</returns>
+   private async Task<(string Body, bool Transient, string Failure)> PostOnceAsync( string payload, TimeSpan timeout )
+   {
+      using var attemptCancellation = new CancellationTokenSource();
+      attemptCancellation.CancelAfter( timeout );
+      try
       {
          using var content = new StringContent( payload, Encoding.UTF8, "application/json" );
-         using var response = await _httpClient.PostAsync( _endpointUrl, content );
+         using var response = await _httpClient.PostAsync( _endpointUrl, content, attemptCancellation.Token );
          if( response.IsSuccessStatusCode )
-            return await response.Content.ReadAsStringAsync();
+            return ( await response.Content.ReadAsStringAsync(), false, null );
 
          var status = (int)response.StatusCode;
          var transient = status == 503 || status == 429 || status == 409 || status == 500 || status == 502 || status == 504;
-         if( !transient || attempt >= maxAttempts )
-            response.EnsureSuccessStatusCode();   // throw with the real status
-
-         await Task.Delay( TimeSpan.FromSeconds( Math.Min( 10, attempt * 2 ) ) );
+         return ( null, transient, $"{status} ({response.ReasonPhrase}) from {_endpointUrl}" );
+      }
+      catch( OperationCanceledException ) when( attemptCancellation.IsCancellationRequested )
+      {
+         return ( null, true, $"no response within {timeout.TotalSeconds:F0}s from {_endpointUrl}" );
       }
    }
 

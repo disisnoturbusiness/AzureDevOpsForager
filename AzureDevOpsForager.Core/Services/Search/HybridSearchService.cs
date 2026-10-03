@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AzureDevOpsForager.Core.Models.API;
 using AzureDevOpsForager.Core.Models.Search;
@@ -33,6 +34,23 @@ public class HybridSearchService : IDisposable
    /// meaningful (an empty term becomes LIKE '%%', matching every file), so the filename merge is skipped.
    /// </summary>
    private const int MinFilenameSearchLength = 2;
+
+   /// <summary>
+   /// How long after a search starts the rerank stage must have finished or given up. Past this point the
+   /// rerank call is cancelled and the fused RRF order is served as-is.
+   /// <para>
+   /// The HF clients each bound their own warm-up retry (query embed 90 s, rerank 150 s), but separate
+   /// budgets do not add up to a safe total: a slow-but-successful embed plus the SQL proc's retries plus a
+   /// full rerank budget can still pass the ~230 s at which Azure App Service abandons the request with a
+   /// 504. Measuring from the start of the search makes the rerank take only the time that is actually
+   /// left. 190 s leaves about 40 s for the rest of the request.
+   /// </para>
+   /// <para>
+   /// Because the reranker warm-up starts at the top of the search, concurrently with the embed, a cold
+   /// reranker still gets the whole window to wake, not just the part left after embedding.
+   /// </para>
+   /// </summary>
+   private static readonly TimeSpan RerankDeadline = TimeSpan.FromSeconds( 190 );
 
    /// <summary>Full-text (keyword) search path and filename lookups. Owned and disposed here.</summary>
    private readonly SqlFtsService _ftsService;
@@ -86,6 +104,7 @@ public class HybridSearchService : IDisposable
    /// </summary>
    public async Task<SearchResponse> SearchAsync( SearchRequest request )
    {
+      using var rerankDeadline = new CancellationTokenSource( RerankDeadline );
       var response = new SearchResponse();
       try
       {
@@ -101,7 +120,7 @@ public class HybridSearchService : IDisposable
                StartRerankerWarmup();
 
                var queryVector = await _embeddingService.EmbedQueryAsync( request.Question );
-               return await SearchViaProcWithRetryAsync( queryVector, request );
+               return await SearchViaProcWithRetryAsync( queryVector, request, rerankDeadline.Token );
             }
             catch( Exception vectorException )
             {
@@ -165,7 +184,10 @@ public class HybridSearchService : IDisposable
    /// outward sign anything went wrong.
    /// </para>
    /// </summary>
-   private async Task<SearchResponse> SearchViaProcWithRetryAsync( float[] queryVector, SearchRequest request )
+   /// <param name="queryVector">The embedded question.</param>
+   /// <param name="request">The search request.</param>
+   /// <param name="rerankDeadline">Fires when the rerank stage must give up; see <see cref="RerankDeadline"/>.</param>
+   private async Task<SearchResponse> SearchViaProcWithRetryAsync( float[] queryVector, SearchRequest request, CancellationToken rerankDeadline )
    {
       const int maxAttempts = 3;
 
@@ -173,7 +195,7 @@ public class HybridSearchService : IDisposable
       {
          try
          {
-            return await SearchViaProcAsync( queryVector, request );
+            return await SearchViaProcAsync( queryVector, request, rerankDeadline );
          }
          catch( Exception exception ) when( attempt < maxAttempts && IsFullTextDaemonFailure( exception ) )
          {
@@ -329,7 +351,10 @@ public class HybridSearchService : IDisposable
    /// an optional cross-encoder rerank. When reranking is on, it over-fetches a wider candidate
    /// pool so the reranker has more to work with, then caps the final list back to NResults.
    /// </summary>
-   private async Task<SearchResponse> SearchViaProcAsync( float[] queryVector, SearchRequest request )
+   /// <param name="queryVector">The embedded question.</param>
+   /// <param name="request">The search request.</param>
+   /// <param name="rerankDeadline">Fires when the rerank stage must give up; see <see cref="RerankDeadline"/>.</param>
+   private async Task<SearchResponse> SearchViaProcAsync( float[] queryVector, SearchRequest request, CancellationToken rerankDeadline )
    {
       var json = System.Text.Json.JsonSerializer.Serialize( queryVector );
       var doRerank = _reranker != null && Config.RerankerEnabled;
@@ -340,7 +365,7 @@ public class HybridSearchService : IDisposable
       var rows = await FetchFusedRowsAsync( json, request.Question, fetchN );
 
       if( doRerank && rows.Count > 1 )
-         rows = await ApplyRerankAsync( request.Question, rows, request.NResults );
+         rows = await ApplyRerankAsync( request.Question, rows, request.NResults, rerankDeadline );
 
       var top = rows.Take( request.NResults ).ToList();
       return new SearchResponse
@@ -419,15 +444,30 @@ public class HybridSearchService : IDisposable
    /// <summary>
    /// Runs the second-stage cross-encoder rerank over the fused rows and returns them in the
    /// reranker's order, stamping each surviving row with its rerank score. Fail-soft: if the
-   /// reranker returns nothing usable, the original RRF order is preserved.
+   /// reranker returns nothing usable, or the search deadline cuts the rerank off, the original RRF order
+   /// is preserved.
    /// </summary>
+   /// <param name="question">The user's question.</param>
+   /// <param name="rows">The fused candidate rows, in RRF order.</param>
+   /// <param name="nResults">How many results the caller wants.</param>
+   /// <param name="rerankDeadline">Fires when the rerank stage must give up; see <see cref="RerankDeadline"/>.</param>
    private async Task<List<(string FilePath, string Content, Dictionary<string, string> Meta)>> ApplyRerankAsync(
       string question,
       List<(string FilePath, string Content, Dictionary<string, string> Meta)> rows,
-      int nResults )
+      int nResults,
+      CancellationToken rerankDeadline )
    {
       var candidates = rows.Select( ( row, i ) => new RerankerCandidate( i, row.Content ) ).ToList();
-      var reranked = await _reranker.RerankAsync( question, candidates, nResults );
+      IReadOnlyList<RerankerResult> reranked;
+      try
+      {
+         reranked = await _reranker.RerankAsync( question, candidates, nResults, rerankDeadline );
+      }
+      catch( OperationCanceledException ) when( rerankDeadline.IsCancellationRequested )
+      {
+         Log( $"[SEARCH] Rerank cut off at the {RerankDeadline.TotalSeconds:F0}s search deadline; serving RRF order for \"{question}\"" );
+         return rows;
+      }
       if( reranked == null || reranked.Count == 0 )
          return rows;
 
